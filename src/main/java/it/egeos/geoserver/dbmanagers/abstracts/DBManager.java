@@ -1,4 +1,4 @@
-package it.egeos.geoserver.restmanagers.Abstracts;
+package it.egeos.geoserver.dbmanagers.abstracts;
 
 import org.apache.log4j.Logger;
 

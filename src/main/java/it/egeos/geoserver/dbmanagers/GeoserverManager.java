@@ -1,21 +1,4 @@
-package it.egeos.geoserver.restmanagers;
-
-import it.egeos.geoserver.dbmanagers.CatalogLoader;
-import it.egeos.geoserver.dbmanagers.Factory;
-import it.egeos.geoserver.restmanagers.Abstracts.DBManager;
-import it.egeos.geoserver.restmanagers.interfaces.GeoserverManagerAPI;
-import it.egeos.geoserver.restmanagers.tuples.LayerGroupTuple;
-import it.egeos.geoserver.restmanagers.tuples.LayerTuple;
-import it.egeos.geoserver.restmanagers.tuples.SqlLayerTuple;
-import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
-import it.egeos.geoserver.restmanagers.tuples.StyleTuple;
-import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
-import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
-import it.egeos.geoserver.restmanagers.tuples.WmsStoreTuple;
-import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
-import it.egeos.geoserver.restmanagers.types.StoreTypes;
-import it.geosolutions.geoserver.rest.decoder.RESTWmsStore;
-import it.geosolutions.geoserver.rest.encoder.datastore.GSPostGISDatastoreEncoder;
+package it.egeos.geoserver.dbmanagers;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -43,11 +26,25 @@ import org.geotools.jdbc.RegexpValidator;
 import org.geotools.jdbc.VirtualTable;
 import org.geotools.jdbc.VirtualTableParameter;
 
+import it.egeos.geoserver.dbmanagers.abstracts.DBManager;
+import it.egeos.geoserver.restmanagers.interfaces.GeoserverManagerAPI;
+import it.egeos.geoserver.restmanagers.tuples.LayerGroupTuple;
+import it.egeos.geoserver.restmanagers.tuples.LayerTuple;
+import it.egeos.geoserver.restmanagers.tuples.SqlLayerTuple;
+import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
+import it.egeos.geoserver.restmanagers.tuples.StyleTuple;
+import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
+import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
+import it.egeos.geoserver.restmanagers.tuples.WmsStoreTuple;
+import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
+import it.egeos.geoserver.restmanagers.types.StoreTypes;
+import it.geosolutions.geoserver.rest.encoder.datastore.GSPostGISDatastoreEncoder;
+
 /**
  * 
  * @author Federico C. Guizzardi - cippinofg <at> gmail.com
  * 
- * RestManager implementation to control a Geoserver
+ * DBManager implementation to control a Geoserver
  *
  */
 
