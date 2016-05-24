@@ -4,12 +4,15 @@ import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
 import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
 
 import java.util.List;
+import java.util.Map;
 
 import org.geoserver.catalog.Catalog;
 import org.geoserver.catalog.FeatureTypeInfo;
 import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.NamespaceInfo;
+import org.geoserver.catalog.ProjectionPolicy;
 import org.geoserver.catalog.StoreInfo;
+import org.geoserver.catalog.WMSLayerInfo;
 import org.geoserver.catalog.WMSStoreInfo;
 import org.geoserver.catalog.WorkspaceInfo;
 import org.geotools.geometry.jts.Geometries;
@@ -74,5 +77,16 @@ public class Factory {
         for(VTParameterTuple p:pars)
             vt.addParameter(new VirtualTableParameter(p.getName(), p.getDefaultValue(),new RegexpValidator(p.getRegexpValidator())));
         return vt;
+    }
+    
+    public WMSLayerInfo newWMSLayerInfo(String workspace,String store,final String layer,final String name,final String title,final Map<String,String> opts){
+        WMSLayerInfo l=cat.getFactory().createWMSLayer();
+        l.setTitle(title);
+        l.setStore(cat.getStoreByName(workspace, store, WMSStoreInfo.class));
+        l.setName(layer);
+        l.setNativeName(name);
+        l.setSRS(opts.get("srs"));
+        l.setProjectionPolicy(ProjectionPolicy.REPROJECT_TO_DECLARED);
+        return l;
     }
 }

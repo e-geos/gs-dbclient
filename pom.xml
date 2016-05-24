@@ -54,11 +54,6 @@
 			<artifactId>gs-jdbcconfig</artifactId>
 			<version>${gs.version}</version>
 		</dependency>
-		<dependency>
-			<groupId>org.geoserver</groupId>
-			<artifactId>gs-main</artifactId>
-			<version>${gs.version}</version>
-		</dependency>
 	</dependencies>
 	<build>
 		<plugins>

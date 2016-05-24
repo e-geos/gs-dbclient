@@ -454,25 +454,28 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
 
     @Override    
     public String addWmsLayer(String workspace,String store,final String layer,final String name,final String title,final Map<String,String> opts){
-        //TODO
+        cat.add(fact.newWMSLayerInfo(workspace,store,layer,name,title,opts));
         return null;
     }
     
     @Override    
     public boolean removeWmsLayer(String workspace,String store,String layerName){
-        //TODO
+        cat.remove(cat.getResourceByStore(cat.getStoreByName(workspace, store, WMSStoreInfo.class), layerName, WMSLayerInfo.class));
         return false;
     }
     
     @Override    
     public boolean removeShapefile(String workspace, String layerName){
-        //TODO
+        LayerInfo l = cat.getLayer(layerName);
+        cat.remove(l);
+        //TODO: workspace is for compatibility
         return false;
     }
                
     @Override    
     public ArrayList<String> getRoles(){
         //TODO
+        
         return null;
     }
 
