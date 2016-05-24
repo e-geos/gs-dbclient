@@ -11,8 +11,10 @@ import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
 import it.egeos.geoserver.restmanagers.tuples.StyleTuple;
 import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
 import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
+import it.egeos.geoserver.restmanagers.tuples.WmsStoreTuple;
 import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
 import it.egeos.geoserver.restmanagers.types.StoreTypes;
+import it.geosolutions.geoserver.rest.decoder.RESTWmsStore;
 import it.geosolutions.geoserver.rest.encoder.datastore.GSPostGISDatastoreEncoder;
 
 import java.io.IOException;
@@ -137,6 +139,12 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         }};
     }
 
+    @Override
+    public WmsStoreTuple getWmsStore(final String workspace,String name){
+        WMSStoreInfo st = cat.getStoreByName(workspace, name, WMSStoreInfo.class);
+        return new WmsStoreTuple(st.getName(), StoreTypes.WMS, new WorkspaceTuple(workspace),st.getCapabilitiesURL(),st.getUsername(),st.getPassword());
+    }
+    
     @Override    
     public String createWmsStore(final WorkspaceTuple workspace,final String name,final String url,final String usr, final String pwd){
         WMSStoreInfo st = fact.newWmsStore(cat.getWorkspaceByName(workspace.name),name,url,usr,pwd);
