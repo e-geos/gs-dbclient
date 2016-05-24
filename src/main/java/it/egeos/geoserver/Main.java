@@ -1,73 +1,113 @@
 package it.egeos.geoserver;
 
-import it.egeos.geoserver.dbmanagers.CatalogLoader;
-import it.egeos.geoserver.dbmanagers.Factory;
+import java.util.ArrayList;
 
 import org.geoserver.catalog.Catalog;
-import org.geoserver.catalog.FeatureTypeInfo;
-import org.geoserver.catalog.LayerGroupInfo;
-import org.geoserver.catalog.LayerInfo;
-import org.geoserver.catalog.MetadataMap;
-import org.geoserver.catalog.NamespaceInfo;
-import org.geoserver.catalog.PublishedInfo;
-import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WorkspaceInfo;
-import org.geotools.jdbc.VirtualTable;
+
+import it.egeos.geoserver.dbmanagers.GeoserverManager;
+import it.egeos.geoserver.restmanagers.tuples.LayerGroupTuple;
+import it.egeos.geoserver.restmanagers.tuples.LayerTuple;
+import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
+import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
 
 
 public class Main {
 
+    @SuppressWarnings("serial")
     public static void main(String[] args) throws Exception {
 
-        String driver="org.postgresql.Driver";
-        String connectionUrl="jdbc:postgresql://localhost:5432/gscatalog";
-        String dbUser="gscatalog";
-        String dbPasswd="gscatalog";
+
+        String connectionUrl="jdbc:postgresql://localhost:5432/geoviewer";
+        String dbUser="geoviewer";
+        String dbPasswd="miofratelloefigliounico";
         
-        Catalog cat = CatalogLoader.getCatalog(driver, connectionUrl, dbUser, dbPasswd);
+        GeoserverManager gm=new GeoserverManager(dbUser, dbPasswd, connectionUrl);
         
-        System.out.println("Namespaces");
-        for(NamespaceInfo s:cat.getNamespaces()){
-            System.out.println("++> "+s.getName()+" "+s.getPrefix()+" "+s.getURI());
-            for(FeatureTypeInfo l:cat.getFeatureTypesByNamespace(s))
-                System.out.println("\tL:"+l.getName()+" "+l.getStore().getType());
+        System.out.println("Prima");
+        Catalog cat = gm.getCat();
+        
+        WorkspaceTuple ws= new WorkspaceTuple("c1p");
+        
+        gm.addWorkspace(ws.name);
+        gm.createPostgisStore(ws, "bbbb", "localhost", 5432, "geoviewer", "geoviewer","miofratelloefigliounico");
+        gm.createWmsStore(ws, "aaaa", "http://share.egeos-services.it/reflector/dev2/service", null, null);
+        
+        System.out.println("Cerco 'aaaa' "+(gm.getWmsStore(ws.name, "aaaa")!=null?"trovato":"mancante"));
+        System.out.println("Cerco 'bbbb' come WMSStore "+(gm.getWmsStore(ws.name, "bbbb")!=null?"trovato":"mancante"));
+        //add layer 1
+        
+        
+        gm.createLayerGroup(ws, "lg_ws00",new ArrayList<LayerTuple>(){{
+            //add layer 1 in lg
+        }});
+        
+        
+        gm.deleteStore(ws, "bbbb");
+        gm.deleteStore(ws, "aaaa");
+        gm.deleteLayerGroup(ws.name,"lg_ws00");
+        gm.deleteWorkspace("c1p");
+        
+        
+        for(WorkspaceInfo w:cat.getWorkspaces()){
+            System.out.println("w: "+w.getName());
+            
+            System.out.println("\tdatastores:");            
+            for(StoreTuple s:gm.getDataStores(new WorkspaceTuple(w.getName()))){
+                System.out.println("\t\td: "+s.name);
+            }
+            
+            System.out.println("\tcoverstores:");
+            for(StoreTuple s:gm.getCoverageStores(new WorkspaceTuple(w.getName()))){
+                System.out.println("\t\tc: "+s.name);            
+            }
+
+            System.out.println("\twmsstores:");
+            for(StoreTuple s:gm.getWmsStores(new WorkspaceTuple(w.getName()))){
+                System.out.println("\t\tw: "+s.name);            
+            }
+
+            System.out.println("\tlayergroups:");
+            for(LayerGroupTuple s:gm.getLayerGroups(w.getName())){
+                System.out.println("\t\tw: "+s.getName());            
+            }
+
             
         }
+        
+       
+
+        /* 
+        * System.out.println("Add...");
+
+        
+        
+        
+        System.out.println("Dopo");
+        for(WorkspaceTuple w:gm.getWorkspaces())
+            System.out.println("w:"+w);
+        
+        System.out.println("Del...");
+        
+
+        System.out.println("Final");
+        for(WorkspaceTuple w:gm.getWorkspaces())
+            System.out.println("w:"+w);
+        */
+        
+        
+        
+
+/*        Catalog cat = CatalogLoader.getCatalog(driver, connectionUrl, dbUser, dbPasswd);
+        Factory f=new Factory(cat);
+        
+        
         for(WorkspaceInfo s:cat.getWorkspaces()){
             System.out.println("--> "+s.getName()+" "+s.toString());
-            for(LayerGroupInfo l:cat.getLayerGroupsByWorkspace(s.getName())){
-                System.out.println("\tLG:"+l.getName());
-                for(PublishedInfo sl:l.getLayers()){
-                    String style="undef";
-                    if (sl instanceof LayerInfo)
-                        style=((LayerInfo)sl).getDefaultStyle().getName();
-                    
-                    System.out.println("\t\t"+sl.getName()+" "+style);
-                }
-                
-                System.out.println("\tMetadata");
-                for(StyleInfo id:l.getStyles())
-                    try {
-                        System.out.println("\t"+id.getName());
-                    }
-                    catch (Exception e) {
-                        System.out.println("\tfail "+e.getMessage());
-                    }
-            }
-        }
+        }*/
         
-        System.out.println("=========================================================================");
-        for(FeatureTypeInfo l:cat.getFeatureTypes()){
-            System.out.println("--"+l.getName());
-            MetadataMap m = l.getMetadata();
-                        
-            for(String k:m.keySet())
-                System.out.println("\t\t"+k+" "+m.get(k));
-            
-           VirtualTable vt = m.get(FeatureTypeInfo.JDBC_VIRTUAL_TABLE, VirtualTable.class);
-           System.out.println("\tvt: "+(vt!=null?vt.getSql():"no sql"));
-        }
-        Factory f=new Factory(cat);
+        
+        
 /*        
         NamespaceInfo ni=f.newNamespace("Oceania2","http://Oceania2");
         WorkspaceInfo ws = f.newWorkspace("Oceania2");
@@ -77,7 +117,7 @@ public class Main {
         */
         
         
-        System.out.println("Fine "+cat);
+        System.out.println("Fine ");
     }
     
 

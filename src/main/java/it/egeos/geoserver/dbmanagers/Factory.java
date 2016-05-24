@@ -1,12 +1,10 @@
 package it.egeos.geoserver.dbmanagers;
 
-import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
-import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
-
 import java.util.List;
 import java.util.Map;
 
 import org.geoserver.catalog.Catalog;
+import org.geoserver.catalog.DataStoreInfo;
 import org.geoserver.catalog.FeatureTypeInfo;
 import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.NamespaceInfo;
@@ -21,6 +19,9 @@ import org.geotools.jdbc.VirtualTable;
 import org.geotools.jdbc.VirtualTableParameter;
 import org.geotools.util.Converters;
 
+import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
+import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
+
 public class Factory {
     private Catalog cat;
 
@@ -31,31 +32,42 @@ public class Factory {
     
     public WorkspaceInfo newWorkspace(String name){
         WorkspaceInfo ws = cat.getFactory().createWorkspace();
-        ws.setName(name);       
+        ws.setName(name);          
         return ws;
     }
 
     public NamespaceInfo newNamespace(String prefix,String uri) {
         NamespaceInfo ns = cat.getFactory().createNamespace();
         ns.setPrefix(prefix);
-        ns.setURI(uri);        
+        ns.setURI(uri);           
         return ns;
     }
 
-    public WMSStoreInfo newWmsStore(WorkspaceInfo ws,final String name,final String url,final String usr, final String pwd) {
-        WMSStoreInfo st = cat.getFactory().create(WMSStoreInfo.class);
+    public WMSStoreInfo newWmsStore(WorkspaceInfo ws,final String name,final String url,final String usr, final String pwd) {       
+        WMSStoreInfo st = cat.getFactory().createWebMapServer();
         st.setName(name);
         st.setCapabilitiesURL(url);
         st.setWorkspace(ws);
         st.setEnabled(true);
         st.setUsername(usr);
         st.setPassword(pwd);
+        st.setType("WMS");
+        st.setEnabled(true);
         return st;
     }
     
-    public LayerGroupInfo newLayerGroup(String workspace, String name){
+    public DataStoreInfo newDataStoreInfo(WorkspaceInfo ws,final String name, String type){
+        DataStoreInfo st = cat.getFactory().createDataStore();
+        st.setName(name);
+        st.setWorkspace(ws);
+        st.setType(type);
+        st.setEnabled(true);
+        return st;
+    }
+    
+    public LayerGroupInfo newLayerGroup(WorkspaceInfo ws, String name){
         LayerGroupInfo lg=cat.getFactory().createLayerGroup();
-        lg.setWorkspace(cat.getWorkspaceByName(workspace));
+        lg.setWorkspace(ws);
         lg.setName(name);
         return lg;
     }

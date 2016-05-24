@@ -1,6 +1,7 @@
 package it.egeos.geoserver.dbmanagers;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -17,6 +18,7 @@ import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.NamespaceInfo;
 import org.geoserver.catalog.PublishedInfo;
+import org.geoserver.catalog.StoreInfo;
 import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WMSLayerInfo;
 import org.geoserver.catalog.WMSStoreInfo;
@@ -38,7 +40,6 @@ import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
 import it.egeos.geoserver.restmanagers.tuples.WmsStoreTuple;
 import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
 import it.egeos.geoserver.restmanagers.types.StoreTypes;
-import it.geosolutions.geoserver.rest.encoder.datastore.GSPostGISDatastoreEncoder;
 
 /**
  * 
@@ -74,6 +75,10 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         }
     }
     
+    public Catalog getCat() {
+        return cat;
+    }
+
     @Override
     @SuppressWarnings("serial")
     public ArrayList<WorkspaceTuple> getWorkspaces(){
@@ -90,15 +95,30 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return true;
     }
 
-    @Override    
+    @Override
+    @Deprecated
     public boolean delWorkspace(String ws){
-        NamespaceInfo ni= cat.getNamespace(ws);
+        return deleteWorkspace(ws);
+    }
+    
+    public boolean deleteWorkspace(String ws){
+        NamespaceInfo ni= cat.getNamespaceByPrefix(ws);
         WorkspaceInfo wi = cat.getWorkspaceByName(ws);
-        cat.remove(wi);
+        
+        for (StoreInfo st:cat.getStoresByWorkspace(ws, StoreInfo.class))
+            deleteStore(st);
+        
+        for (LayerGroupInfo lg:cat.getLayerGroupsByWorkspace(ws))
+            deleteLayerGroup(lg);
+        
+        cat.detach(ni);
+        cat.detach(wi);
         cat.remove(ni);
+        cat.remove(wi);
         return true;
     }
-            
+    
+
     @SuppressWarnings("serial")
     @Override    
     public List<StoreTuple> getDataStores(final WorkspaceTuple workspace){
@@ -111,13 +131,13 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     @SuppressWarnings("serial")
     @Override    
     public List<StoreTuple> getPostgisStores(final WorkspaceTuple workspace){
-        return new ArrayList<StoreTuple>(){{
+        return new ArrayList<StoreTuple>(){{            
             for(DataStoreInfo ds:cat.getDataStoresByWorkspace(cat.getWorkspaceByName(workspace.name)))
                 if ("PostGIS".equals(ds.getType()))
                     add(new StoreTuple(ds.getName(), StoreTypes.DATA, workspace));
         }};
     }
-    
+       
     @SuppressWarnings("serial")
     @Override    
     public ArrayList<StoreTuple> getCoverageStores(final WorkspaceTuple workspace){
@@ -136,10 +156,45 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         }};
     }
 
+    @Override    
+    @SuppressWarnings("serial")
+    public List<LayerGroupTuple> getLayerGroups(final String workspace){     
+        return new ArrayList<LayerGroupTuple>(){{
+            List<LayerGroupInfo> lgs = cat.getLayerGroupsByWorkspace(workspace);
+            if(lgs!=null)
+                for(LayerGroupInfo lg:lgs){
+                    ReferencedEnvelope b = lg.getBounds();
+                    add(new LayerGroupTuple(
+                        lg.getName(),
+                        lg.getTitle(),
+                        b.getMaxX(),
+                        b.getMaxY(),
+                        b.getMinX(),
+                        b.getMinY(),
+                        b.getCoordinateReferenceSystem().toString()
+                    ));
+                }
+        }};
+    }
+
     @Override
     public WmsStoreTuple getWmsStore(final String workspace,String name){
         WMSStoreInfo st = cat.getStoreByName(workspace, name, WMSStoreInfo.class);
-        return new WmsStoreTuple(st.getName(), StoreTypes.WMS, new WorkspaceTuple(workspace),st.getCapabilitiesURL(),st.getUsername(),st.getPassword());
+        return st!=null?new WmsStoreTuple(st.getName(), StoreTypes.WMS, new WorkspaceTuple(workspace),st.getCapabilitiesURL(),st.getUsername(),st.getPassword()):null;
+    }
+    
+    public DataStoreInfo createPostgisStore(final WorkspaceTuple workspace,final String name,final String host,final Integer port,final String dbname,final String usr,final String pwd){
+        DataStoreInfo ds = fact.newDataStoreInfo(cat.getWorkspaceByName(workspace.name), name,"PostGIS");
+        Map<String, Serializable> pars = ds.getConnectionParameters();
+        pars.put("schema", workspace.name);
+        pars.put("database",dbname);
+        pars.put("host",host);
+        pars.put("port",port);
+        pars.put("passwd",pwd);
+        pars.put("dbtype","postgis");
+        pars.put("user",usr);
+        cat.add(ds);
+        return ds;
     }
     
     @Override    
@@ -148,13 +203,75 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         cat.add(st);
         return st.getId();
     }
-
-    @Override    
-    public String deleteWMSStore(final WorkspaceTuple workspace,String name){       
-        WMSStoreInfo st = cat.getStoreByName(workspace.name, name, WMSStoreInfo.class);
-        cat.remove(st);
-        return st.getId();
+    
+    @SuppressWarnings("serial")
+    public LayerGroupInfo createLayerGroup(final WorkspaceTuple workspace,final String layer,final List<LayerTuple> subs){
+        LayerGroupInfo lg = fact.newLayerGroup(cat.getWorkspaceByName(workspace.name),layer);        
+        assignSubLayers(lg, new LinkedHashMap<PublishedInfo, String>(){{
+            for(LayerTuple s:subs)
+                put(s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name),null);
+        }});        
+        cat.add(lg);        
+        return lg;
+        
     }
+    
+    public void deleteStore(final WorkspaceTuple workspace,String name){       
+        deleteStore(cat.getStoreByName(workspace.name, name, StoreInfo.class));
+    }
+    
+    public void deleteStore(StoreInfo st){
+        //TODO: remove layers
+        cat.remove(st);        
+    }
+    
+    @Override    
+    public Boolean deleteLayerGroup(String workspace,String layer){
+        deleteLayerGroup(cat.getLayerGroupByName(workspace, layer));            
+        return true;
+    }
+    
+    public void deleteLayerGroup(LayerGroupInfo lg) {        
+        cat.remove(lg);        
+    }
+
+    /* Deprecated */ 
+    @Deprecated
+    @Override    
+    public boolean linkPGSchema(final String workspace,final String name,final String host,final Integer port,final String dbname,final String usr,final String pwd){       
+        createPostgisStore(new WorkspaceTuple(workspace), name,host,port,dbname,usr,pwd);        
+        return true;
+    }
+
+    @Deprecated
+    @Override        
+    public String deleteWMSStore(final WorkspaceTuple workspace,String name){       
+        deleteStore(workspace, name);
+        return null;
+    }
+    
+    @Override    
+    @Deprecated
+    public String addLayerGroup(final String workspace,final String layer,final List<LayerTuple> subs){        
+        return createLayerGroup(new WorkspaceTuple(workspace), layer, subs).getId();
+    }
+    
+    
+    
+    //TODO: verify from here
+
+    
+
+
+    
+
+    
+
+
+    
+
+
+ 
             
     @Override    
     public WorkspaceTuple getWorkspace(final LayerTuple layer){
@@ -192,26 +309,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         }};
      }
         
-    @Override    
-    @SuppressWarnings("serial")
-    public List<LayerGroupTuple> getLayerGroups(final String workspace){     
-        return new ArrayList<LayerGroupTuple>(){{
-            List<LayerGroupInfo> lgs = cat.getLayerGroupsByWorkspace(workspace);
-            if(lgs!=null)
-                for(LayerGroupInfo lg:lgs){
-                    ReferencedEnvelope b = lg.getBounds();
-                    add(new LayerGroupTuple(
-                        lg.getName(),
-                        lg.getTitle(),
-                        b.getMaxX(),
-                        b.getMaxY(),
-                        b.getMinX(),
-                        b.getMinY(),
-                        b.getCoordinateReferenceSystem().toString()
-                    ));
-                }
-        }};
-    }
+
 
     /*
         * returns a list of <name,style> merging 'publishables' and 'styles' properties 
@@ -272,18 +370,6 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
             }});
         cat.save(lg);
         return true;
-     }
-    
-    @Override    
-    @SuppressWarnings("serial")
-    public String addLayerGroup(final String workspace,final String layer,final List<LayerTuple> subs){
-        LayerGroupInfo lg = fact.newLayerGroup(workspace,layer);        
-        assignSubLayers(lg, new LinkedHashMap<PublishedInfo, String>(){{
-            for(LayerTuple s:subs)
-                put(s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name),null);
-        }});        
-        cat.add(lg);
-        return null;
     }
 
     private void assignSubLayers(LayerGroupInfo lg,LinkedHashMap<PublishedInfo, String> subs){        
@@ -302,13 +388,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         }
     }
     
-    @Override    
-    public Boolean deleteLayerGroup(String workspace,String layer){
-        LayerGroupInfo lg = cat.getLayerGroupByName(workspace, layer);
-        if(lg!=null)
-            cat.remove(lg);
-        return true;
-    }
+
         
     @SuppressWarnings("serial")
     @Override    
@@ -753,11 +833,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return null;
     }
     
-    @Override    
-    public boolean linkPGSchema(String workspace,GSPostGISDatastoreEncoder store){
-        //TODO
-        return false;
-    }
+
 
     @Override    
     public boolean linkPGTable(final LayerTuple lt,final String nativeCRS){
