@@ -17,16 +17,20 @@ import org.geoserver.catalog.FeatureTypeInfo;
 import org.geoserver.catalog.LayerGroupInfo;
 import org.geoserver.catalog.LayerInfo;
 import org.geoserver.catalog.NamespaceInfo;
+import org.geoserver.catalog.ProjectionPolicy;
 import org.geoserver.catalog.PublishedInfo;
 import org.geoserver.catalog.StoreInfo;
 import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WMSLayerInfo;
 import org.geoserver.catalog.WMSStoreInfo;
 import org.geoserver.catalog.WorkspaceInfo;
+import org.geotools.geometry.jts.Geometries;
 import org.geotools.geometry.jts.ReferencedEnvelope;
+import org.geotools.jdbc.JDBCDataStore;
 import org.geotools.jdbc.RegexpValidator;
 import org.geotools.jdbc.VirtualTable;
 import org.geotools.jdbc.VirtualTableParameter;
+import org.geotools.util.Converters;
 
 import it.egeos.geoserver.dbmanagers.abstracts.DBManager;
 import it.egeos.geoserver.restmanagers.interfaces.GeoserverManagerAPI;
@@ -50,8 +54,7 @@ import it.egeos.geoserver.restmanagers.types.StoreTypes;
  */
 
 public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
-    private Catalog cat;
-    private Factory fact;    
+    private Catalog cat; 
     private String driver="org.postgresql.Driver";
     
     //Available access mode
@@ -67,18 +70,10 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         catch (IOException e) {
             log.error("Can't open catalog", e);
         }        
-        try {
-            fact=new Factory(cat);
-        } 
-        catch (NullPointerException e) {
-            log.error("Can't generate Factory", e);
-        }
     }
     
-    public Catalog getCat() {
-        return cat;
-    }
-
+    /** WORKSPACES **/
+    
     @Override
     @SuppressWarnings("serial")
     public ArrayList<WorkspaceTuple> getWorkspaces(){
@@ -88,36 +83,19 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         }};
     }
     
-    @Override    
-    public boolean addWorkspace(String ws){        
-        cat.add(fact.newNamespace(ws,"http://"+ws));
-        cat.add(fact.newWorkspace(ws));        
+    public boolean createWorkspace(String ws){               
+        cat.add(newNamespace(ws,"http://"+ws));
+        cat.add(newWorkspace(ws));        
         return true;
-    }
-
-    @Override
-    @Deprecated
-    public boolean delWorkspace(String ws){
-        return deleteWorkspace(ws);
     }
     
     public boolean deleteWorkspace(String ws){
-        NamespaceInfo ni= cat.getNamespaceByPrefix(ws);
         WorkspaceInfo wi = cat.getWorkspaceByName(ws);
-        
-        for (StoreInfo st:cat.getStoresByWorkspace(ws, StoreInfo.class))
-            deleteStore(st);
-        
-        for (LayerGroupInfo lg:cat.getLayerGroupsByWorkspace(ws))
-            deleteLayerGroup(lg);
-        
-        cat.detach(ni);
-        cat.detach(wi);
-        cat.remove(ni);
-        cat.remove(wi);
+        getBuilder().removeWorkspace(wi, true);
         return true;
     }
     
+    /** STORES **/
 
     @SuppressWarnings("serial")
     @Override    
@@ -184,7 +162,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     }
     
     public DataStoreInfo createPostgisStore(final WorkspaceTuple workspace,final String name,final String host,final Integer port,final String dbname,final String usr,final String pwd){
-        DataStoreInfo ds = fact.newDataStoreInfo(cat.getWorkspaceByName(workspace.name), name,"PostGIS");
+        DataStoreInfo ds = newDataStoreInfo(cat.getWorkspaceByName(workspace.name), name,"PostGIS");
         Map<String, Serializable> pars = ds.getConnectionParameters();
         pars.put("schema", workspace.name);
         pars.put("database",dbname);
@@ -199,14 +177,14 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     
     @Override    
     public String createWmsStore(final WorkspaceTuple workspace,final String name,final String url,final String usr, final String pwd){
-        WMSStoreInfo st = fact.newWmsStore(cat.getWorkspaceByName(workspace.name),name,url,usr,pwd);
+        WMSStoreInfo st = newWmsStore(cat.getWorkspaceByName(workspace.name),name,url,usr,pwd);
         cat.add(st);
         return st.getId();
     }
     
     @SuppressWarnings("serial")
     public LayerGroupInfo createLayerGroup(final WorkspaceTuple workspace,final String layer,final List<LayerTuple> subs){
-        LayerGroupInfo lg = fact.newLayerGroup(cat.getWorkspaceByName(workspace.name),layer);        
+        LayerGroupInfo lg = newLayerGroup(cat.getWorkspaceByName(workspace.name),layer);        
         assignSubLayers(lg, new LinkedHashMap<PublishedInfo, String>(){{
             for(LayerTuple s:subs)
                 put(s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name),null);
@@ -221,8 +199,8 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     }
     
     public void deleteStore(StoreInfo st){
-        //TODO: remove layers
-        cat.remove(st);        
+        CatalogBuilder b = getBuilder(st);
+        b.removeStore(st, true);
     }
     
     @Override    
@@ -231,11 +209,186 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return true;
     }
     
-    public void deleteLayerGroup(LayerGroupInfo lg) {        
+    public void deleteLayerGroup(LayerGroupInfo lg) {    
         cat.remove(lg);        
     }
+    
+    /** Layers **/
+    @SuppressWarnings("serial")
+    @Override    
+    public ArrayList<LayerTuple> getFeatureLayersList(final String workspace){
+        return new ArrayList<LayerTuple>(){{                    
+            for(DataStoreInfo st:cat.getDataStoresByWorkspace(cat.getWorkspaceByName(workspace)))                
+                for(FeatureTypeInfo ft:cat.getFeatureTypesByDataStore(st)){                
+                    LayerTuple lt = new LayerTuple(ft.getName(), ft.getTitle(), new StoreTuple(ft.getStore().getName(),StoreTypes.DATA, new WorkspaceTuple(workspace)));                   
+                    ReferencedEnvelope bb = ft.getNativeBoundingBox();
+                    lt.minX=bb.getMinX();
+                    lt.minY=bb.getMinY();
+                    lt.maxX=bb.getMaxX();
+                    lt.maxY=bb.getMaxY();
+                    lt.crs=ft.getSRS();
+                    lt.nativeName=ft.getNativeName();
+                    add(lt);
+                }
+        }};
+    }
+    
+    @SuppressWarnings("serial")
+    public ArrayList<LayerTuple> getCoverageLayersList(final String workspace){
+        return new ArrayList<LayerTuple>(){{
+            for(CoverageStoreInfo st:cat.getCoverageStoresByWorkspace(cat.getWorkspaceByName(workspace)))                
+                for(CoverageInfo ft:cat.getCoveragesByCoverageStore(st)){                
+                    LayerTuple lt = new LayerTuple(ft.getName(), ft.getTitle(), new StoreTuple(ft.getStore().getName(),StoreTypes.COVERAGE, new WorkspaceTuple(workspace)));
+                    ReferencedEnvelope bb = ft.getNativeBoundingBox();
+                    lt.minX=bb.getMinX();
+                    lt.minY=bb.getMinY();
+                    lt.maxX=bb.getMaxX();
+                    lt.maxY=bb.getMaxY();
+                    lt.crs=ft.getSRS();
+                    lt.nativeName=ft.getNativeName();
+                    add(lt);
+                }
+        }};
+    }
+    
+    @SuppressWarnings("serial")   
+    public ArrayList<LayerTuple> getWmsLayersList(final String workspace){
+        return new ArrayList<LayerTuple>(){{
+            for(WMSStoreInfo st:cat.getStoresByWorkspace(workspace, WMSStoreInfo.class))
+                for(WMSLayerInfo r:cat.getResourcesByStore(st, WMSLayerInfo.class)){
+                    LayerTuple lt = new LayerTuple(r.getName(), r.getTitle(), new StoreTuple(r.getStore().getName(),StoreTypes.DATA, new WorkspaceTuple(workspace)));
+                    ReferencedEnvelope bb = r.getNativeBoundingBox();
+                    lt.minX=bb.getMinX();
+                    lt.minY=bb.getMinY();
+                    lt.maxX=bb.getMaxX();
+                    lt.maxY=bb.getMaxY();
+                    lt.crs=r.getSRS();
+                    lt.nativeName=r.getNativeName();
+                    add(lt);
+                }
+        }};
+    }
+    
+    @SuppressWarnings("serial")
+    @Override    
+    public SqlLayerTuple getSQLLayer(String workspace,String store,final String feature_name){     
+        FeatureTypeInfo ft=cat.getFeatureTypeByDataStore(cat.getDataStoreByName(workspace, store), feature_name);
+        VirtualTable vt = ft.getMetadata().get(FeatureTypeInfo.JDBC_VIRTUAL_TABLE,VirtualTable.class);
+        return new SqlLayerTuple(
+            ft.getName(),
+            ft.getTitle(), 
+            new StoreTuple(store, StoreTypes.DATA, new WorkspaceTuple(workspace)), 
+            vt.getSql(), 
+            new ArrayList<VTGeometryTuple>(){{
+                for(String g:vt.getGeometries())
+                    add(new VTGeometryTuple(g, vt.getGeometryType(g).getTypeName(), vt.getNativeSrid(g)+""));
+            }}, 
+            new ArrayList<VTParameterTuple>(){{
+                for(String p:vt.getParameterNames()){
+                    VirtualTableParameter par=vt.getParameter(p);
+                    RegexpValidator val = (RegexpValidator)par.getValidator();
+                    add(new VTParameterTuple(par.getName(),par.getDefaultValue(),val.getPattern().pattern()));
+                }
+            }}
+        );
+    }
 
+    public FeatureTypeInfo createFeatureType(final LayerTuple lt,final String nativeCRS) throws Exception{
+        StoreTuple st = lt.store;        
+        return newFeatureTypeInfo(st.workspace.name, st.name, lt.name,nativeCRS);
+    }
+    
+    public WMSLayerInfo createWmsLayer(String workspace,String store,final String layer,final String name,final String title, String srs, ProjectionPolicy policy) throws Exception{
+        return newWmsLayerInfo(workspace,store,layer,name,title,srs,policy);
+    }
+        
+    public FeatureTypeInfo createSqlLayer(final SqlLayerTuple slt) throws Exception{
+        return newSqlFeatureTypeInfo(
+            slt.store.workspace.name,
+            slt.store.name,
+            slt.name,
+            slt.sql,
+            slt.geomEncList,
+            slt.paramEncList
+        );
+    }
+    
+    @SuppressWarnings("serial")
+    public List<StyleTuple> getLayerStyles(final String workspace,final String layer){
+        return new ArrayList<StyleTuple>(){{
+            FeatureTypeInfo ft = cat.getFeatureTypeByName(workspace, layer);
+            LayerInfo ly = cat.getLayerByName(ft.getQualifiedNativeName());
+            for(StyleInfo s:ly.getStyles()){
+                WorkspaceInfo ws = s.getWorkspace();
+                WorkspaceTuple wst= ws!=null?new WorkspaceTuple(ws.getName()):null;
+                add(new StyleTuple(s.getName(), s.getFormat(), s.getFilename(),wst));
+            }
+        }};
+    }
+    
+    @Override    
+    public String assignOptStyle(String workspace,String layer,String style){     
+        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
+        LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName()); 
+        l.getStyles().add(cat.getStyleByName(style));
+        cat.save(l);
+        return null;
+    }
+
+    public String getDefaultStyle(String workspace,String layer){
+        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
+        LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName());        
+        return l.getDefaultStyle().getName();
+    }
+     
+    public void setDefaultStyle(String workspace,String layer,String style){        
+        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
+        LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName());
+        
+        StyleInfo st = cat.getStyleByName(workspace,style);
+        if (st==null)
+            st = cat.getStyleByName(style);
+        l.setDefaultStyle(st);
+        cat.save(l);        
+    }
+    
+    public void removeStyle(String workspace, String layer,String style){
+        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
+        LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName());
+        
+        StyleInfo st = cat.getStyleByName(workspace,style);
+        if (st==null)
+            st = cat.getStyleByName(style);
+        
+        l.getStyles().remove(st);
+        cat.save(l);
+    }
+    
     /* Deprecated */ 
+
+    /**
+     * @deprecated replaced by {@link #createWorkspace(String ws)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean addWorkspace(String ws){               
+        cat.add(newNamespace(ws,"http://"+ws));
+        cat.add(newWorkspace(ws));        
+        return true;
+    }
+
+    /**
+     * @deprecated replaced by {@link #deleteWorkspace(String ws)} 
+     */
+    @Override
+    @Deprecated
+    public boolean delWorkspace(String ws){
+        return deleteWorkspace(ws);
+    }
+    
+    /**
+     * @deprecated replaced by {@link #createPostgisStore(final WorkspaceTuple workspace,final String name,final String host,final Integer port,final String dbname,final String usr,final String pwd)} 
+     */
     @Deprecated
     @Override    
     public boolean linkPGSchema(final String workspace,final String name,final String host,final Integer port,final String dbname,final String usr,final String pwd){       
@@ -243,59 +396,124 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return true;
     }
 
+    /**
+     * @deprecated replaced by {@link #deleteStore(final WorkspaceTuple workspace,String name)}
+     */
     @Deprecated
     @Override        
     public String deleteWMSStore(final WorkspaceTuple workspace,String name){       
         deleteStore(workspace, name);
         return null;
     }
-    
+
+    /**
+     * @deprecated replaced by {@link #createLayerGroup(final WorkspaceTuple workspace,final String layer,final List<LayerTuple> subs)}
+     */
     @Override    
     @Deprecated
     public String addLayerGroup(final String workspace,final String layer,final List<LayerTuple> subs){        
         return createLayerGroup(new WorkspaceTuple(workspace), layer, subs).getId();
     }
     
-    
-    
-    //TODO: verify from here
-
-    
-
-
-    
-
-    
-
-
-    
-
-
- 
-            
+    /**
+     * @deprecated replaced by {@link #getWmsLayersList(final String workspace)}
+     */
+    @Deprecated
+    @SuppressWarnings("serial")
     @Override    
-    public WorkspaceTuple getWorkspace(final LayerTuple layer){
-        WorkspaceTuple res=null;
-        LayerInfo l = cat.getLayerByName(layer.name);
-        if(l!=null){
-            FeatureTypeInfo ft = cat.getFeatureType(l.getId());
-            if (ft!=null)
-                res=new WorkspaceTuple(ft.getNamespace().getName());
-        }
-        return res;
+    public ArrayList<LayerTuple> getCoverageLayersList(final String workspace,final String store){
+        return new ArrayList<LayerTuple>(){{
+            for(CoverageInfo c:cat.getCoveragesByStore(cat.getCoverageStoreByName(cat.getWorkspaceByName(workspace), store))){
+                LayerTuple lt = new LayerTuple(c.getName(), c.getTitle(), new StoreTuple(c.getStore().getName(),StoreTypes.COVERAGE, new WorkspaceTuple(workspace)));
+                ReferencedEnvelope bb = c.getNativeBoundingBox();
+                lt.minX=bb.getMinX();
+                lt.minY=bb.getMinY();
+                lt.maxX=bb.getMaxX();
+                lt.maxY=bb.getMaxY();
+                lt.crs=c.getSRS();                         
+                lt.nativeName=c.getNativeName();
+                add(lt);
+            }
+        }};
+    }
+    
+    /**
+     * @deprecated replaced by {@link #getCoverageLayersList(final String workspace)}
+     */
+    @Deprecated
+    @SuppressWarnings("serial")
+    @Override    
+    public ArrayList<LayerTuple> getWmsLayersList(final String workspace,final String store){
+        return new ArrayList<LayerTuple>(){{            
+            for(WMSLayerInfo r:cat.getResourcesByStore(cat.getStoreByName(workspace, store, WMSStoreInfo.class),WMSLayerInfo.class)){
+                LayerTuple lt = new LayerTuple(r.getName(), r.getTitle(), new StoreTuple(r.getStore().getName(),StoreTypes.DATA, new WorkspaceTuple(workspace)));
+                ReferencedEnvelope bb = r.getNativeBoundingBox();
+                lt.minX=bb.getMinX();
+                lt.minY=bb.getMinY();
+                lt.maxX=bb.getMaxX();
+                lt.maxY=bb.getMaxY();
+                lt.crs=r.getSRS();
+                lt.nativeName=r.getNativeName();
+                add(lt);
+            }
+        }};
     }
 
+    /**
+     * deprecated replaced by {@link #addWmsLayer(String workspace,String store,final String layer,final String name,final String title, String srs, ProjectionPolicy policy) }
+     */
     @Override    
-    public StoreTuple getStore(WorkspaceTuple workspace, LayerTuple layer){     
-        StoreTuple res=null;
-        FeatureTypeInfo ft = cat.getFeatureTypeByName(workspace.name, layer.name);
-        if (ft!=null){
-            DataStoreInfo st = ft.getStore();
-            res=new StoreTuple(st.getName(), StoreTypes.DATA, workspace);
-        }
-        return res;
-    }
+    @Deprecated
+    public String addWmsLayer(String workspace,String store,final String layer,final String name,final String title,final Map<String,String> opts){
+        ProjectionPolicy pp=ProjectionPolicy.NONE;
+        String policy = opts.get("projectionPolicy");
+        if ("REPROJECT_TO_DECLARED".equals(policy))
+            pp=ProjectionPolicy.REPROJECT_TO_DECLARED;
+        else if ("FORCE_DECLARED".equals(policy))
+            pp=ProjectionPolicy.FORCE_DECLARED;
         
+        try {
+            return createWmsLayer(workspace,store,layer,name,title,opts.get("srs"),pp).toString();
+        }
+        catch (Exception e) {
+            log.error("Can't create a wms layer "+workspace+"."+store+"."+layer+": "+e.getMessage(), e);
+            return null;
+        }
+    }
+    
+    /**
+     * @deprecated replaced by {@link #createSqlLayer(final SqlLayerTuple slt)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean addSQLLayer(final SqlLayerTuple slt) {
+        try {
+            return createSqlLayer(slt)!=null;
+        }
+        catch (Exception e) {
+            log.error("Can't create sql layer: "+e.getMessage(), e);
+        }
+        return false;
+    }
+
+    /**
+     * @deprecated replaced by {@link #createFeatureType(final LayerTuple lt,final String nativeCRS)}
+     */    
+    @Deprecated
+    @Override    
+    public boolean linkPGTable(final LayerTuple lt,final String nativeCRS){
+        try {
+            return createFeatureType(lt,nativeCRS)!=null;
+        }
+        catch (Exception e) {
+            log.error("Can't link pg table: "+e.getMessage(), e);
+        }
+        return false;
+    }
+
+    /**
+     * @deprecated replaced by {@link #getLayerStyles(final String workspace,final String layer)} 
+     */
     @Override    
     @SuppressWarnings("serial")
     public List<StyleTuple> getLayerStyles(final String layer){
@@ -307,9 +525,48 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
                 add(new StyleTuple(s.getName(), s.getFormat(), s.getFilename(),wst));
             }
         }};
-     }
-        
+    }
+   
+    /**
+     * @deprecated replaced by {@link #getDefaultStyle(final String workspace,String layer)} 
+     */
+    @Deprecated
+    @Override        
+    public String getDefaultStyle(String layer){
+        LayerInfo li=cat.getLayerByName(layer);
+        return li.getDefaultStyle().getName();
+    }
+   
+    /**
+     * @deprecated replaced by {@link #setDefaultStyle(final String workspace,final String layer,final String style)} 
+     */    
+    @Deprecated
+    @Override    
+    public String assignStyle(final String workspace,final String layer,final String style){
+        setDefaultStyle(workspace, layer, style);
+        return style;
+    }
+       
+    /**
+     * @deprecated replaced by {@link #removeStyle(String workspace, String layer,String style)} 
+     */
+    @Deprecated
+    @Override    
+    public String removeStyle(String layer,String style){
+        LayerInfo l=cat.getLayerByName(layer);
+        l.getStyles().remove(cat.getStyleByName(style));
+        cat.save(l);
+        return null;
+    }
+    
+    //TODO: verify from here
 
+
+    
+    
+    
+        
+ 
 
     /*
         * returns a list of <name,style> merging 'publishables' and 'styles' properties 
@@ -378,122 +635,25 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
             lg.getLayers().add(l);            
             lg.getStyles().add(style!=null?cat.getStyleByName(style):null);           
         }
-        
-        CatalogBuilder builder = new CatalogBuilder(cat);
         try {
-            builder.calculateLayerGroupBounds(lg);
+            getBuilder().calculateLayerGroupBounds(lg);
         }
         catch (Exception e) {
             log.error("Can't create a layergroup in '"+lg.getWorkspace().getName()+"' with name '"+lg.getName()+"': "+e.getMessage(), e);            
         }
     }
-    
-
-        
-    @SuppressWarnings("serial")
-    @Override    
-    public ArrayList<LayerTuple> getFeatureLayersList(final String workspace){
-        return new ArrayList<LayerTuple>(){{            
-            for(FeatureTypeInfo ft:cat.getFeatureTypesByNamespace(cat.getNamespace(workspace))){                
-                LayerTuple lt = new LayerTuple(ft.getName(), ft.getTitle(), new StoreTuple(ft.getStore().getName(),StoreTypes.DATA, new WorkspaceTuple(workspace)));
-                ReferencedEnvelope bb = ft.getNativeBoundingBox();
-                lt.minX=bb.getMinX();
-                lt.minY=bb.getMinY();
-                lt.maxX=bb.getMaxX();
-                lt.maxY=bb.getMaxY();
-                lt.crs=ft.getSRS();
-                lt.nativeName=ft.getNativeName();
-                add(lt);
-            }
-        }};
-    }
-    
-    @SuppressWarnings("serial")
-    @Override    
-    public ArrayList<LayerTuple> getCoverageLayersList(final String workspace,final String store){
-        return new ArrayList<LayerTuple>(){{
-            for(CoverageInfo c:cat.getCoveragesByStore(cat.getCoverageStoreByName(cat.getWorkspaceByName(workspace), store))){
-                LayerTuple lt = new LayerTuple(c.getName(), c.getTitle(), new StoreTuple(c.getStore().getName(),StoreTypes.DATA, new WorkspaceTuple(workspace)));
-                ReferencedEnvelope bb = c.getNativeBoundingBox();
-                lt.minX=bb.getMinX();
-                lt.minY=bb.getMinY();
-                lt.maxX=bb.getMaxX();
-                lt.maxY=bb.getMaxY();
-                lt.crs=c.getSRS();                         
-                lt.nativeName=c.getNativeName();
-                add(lt);
-            }
-        }};
-    }
-
-    @SuppressWarnings("serial")
-    @Override    
-    public ArrayList<LayerTuple> getWmsLayersList(final String workspace,final String store){
-        return new ArrayList<LayerTuple>(){{            
-            for(WMSLayerInfo r:cat.getResourcesByStore(cat.getStoreByName(workspace, store, WMSStoreInfo.class),WMSLayerInfo.class)){
-                LayerTuple lt = new LayerTuple(r.getName(), r.getTitle(), new StoreTuple(r.getStore().getName(),StoreTypes.DATA, new WorkspaceTuple(workspace)));
-                ReferencedEnvelope bb = r.getNativeBoundingBox();
-                lt.minX=bb.getMinX();
-                lt.minY=bb.getMinY();
-                lt.maxX=bb.getMaxX();
-                lt.maxY=bb.getMaxY();
-                lt.crs=r.getSRS();
-                lt.nativeName=r.getNativeName();
-                add(lt);
-            }
-        }};
-     }
             
-    @Override    
-    public boolean addSQLLayer(final SqlLayerTuple slt){
-        FeatureTypeInfo ft= fact.newFeatureTypeInfo(
-            slt.store.workspace.name,
-            slt.store.name,
-            slt.name
-        );
-        ft.getMetadata().put(
-            FeatureTypeInfo.JDBC_VIRTUAL_TABLE, 
-            fact.newVirtualTable(
-                slt.name,
-                slt.sql,
-                slt.geomEncList,
-                slt.paramEncList
-            )
-        );
-        cat.add(ft);
-        return false;
-    }
+            
+
         
-    @SuppressWarnings("serial")
-    @Override    
-    public SqlLayerTuple getSQLLayer(String workspace,String store,final String feature_name){     
-        FeatureTypeInfo ft=cat.getFeatureTypeByDataStore(cat.getDataStoreByName(workspace, store), feature_name);
-        VirtualTable vt = ft.getMetadata().get(FeatureTypeInfo.JDBC_VIRTUAL_TABLE,VirtualTable.class);
-        return new SqlLayerTuple(
-            ft.getName(),
-            ft.getTitle(), 
-            new StoreTuple(store, StoreTypes.DATA, new WorkspaceTuple(workspace)), 
-            vt.getSql(), 
-            new ArrayList<VTGeometryTuple>(){{
-                for(String g:vt.getGeometries())
-                    add(new VTGeometryTuple(g, vt.getGeometryType(g).getTypeName(), vt.getNativeSrid(g)+""));
-            }}, 
-            new ArrayList<VTParameterTuple>(){{
-                for(String p:vt.getParameterNames()){
-                    VirtualTableParameter par=vt.getParameter(p);
-                    RegexpValidator val = (RegexpValidator)par.getValidator();
-                    add(new VTParameterTuple(par.getName(),par.getDefaultValue(),val.getPattern().pattern()));
-                }
-            }}
-        );
-    }
+
         
     @Override    
     public boolean updateSQLLayer(final SqlLayerTuple slt){
         FeatureTypeInfo ft=cat.getFeatureTypeByDataStore(cat.getDataStoreByName(slt.store.workspace.name, slt.store.name), slt.name);
         ft.getMetadata().put(
             FeatureTypeInfo.JDBC_VIRTUAL_TABLE, 
-            fact.newVirtualTable(
+            newVirtualTable(
                 slt.name,
                 slt.sql,
                 slt.geomEncList,
@@ -505,43 +665,15 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return false;
     }
 
-    @Override        
-    public String getDefaultStyle(String layer){
-        LayerInfo li=cat.getLayerByName(layer);
-        return li.getDefaultStyle().getName();
-    }
+
     
-    @Override    
-    public String assignStyle(final String workspace,final String layer,final String style){        
-        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
-        LayerInfo l = cat.getLayer(ft.getId());
-        l.setDefaultStyle(cat.getStyleByName(style));
-        cat.save(l);
-        return null;
-    }
 
-    @Override    
-    public String assignOptStyle(final String workspace,final String layer,final String style){     
-        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
-        LayerInfo l = cat.getLayer(ft.getId());
-        l.getStyles().add(cat.getStyleByName(style));
-        cat.save(l);
-        return null;
-    }
 
-    @Override    
-    public String removeStyle(final String layer,final String style){
-        LayerInfo l=cat.getLayerByName(layer);
-        l.getStyles().remove(cat.getStyleByName(style));
-        cat.save(l);
-        return null;
-    }
 
-    @Override    
-    public String addWmsLayer(String workspace,String store,final String layer,final String name,final String title,final Map<String,String> opts){
-        cat.add(fact.newWMSLayerInfo(workspace,store,layer,name,title,opts));
-        return null;
-    }
+
+
+
+
     
     @Override    
     public boolean removeWmsLayer(String workspace,String store,String layerName){
@@ -835,11 +967,6 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     
 
 
-    @Override    
-    public boolean linkPGTable(final LayerTuple lt,final String nativeCRS){
-        //TODO
-        return false;
-    }
     
     @Override    
     public boolean removeFeatureType(String workspace, String storename, String layerName){
@@ -852,4 +979,124 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         //TODO
         return false;
     }
+    
+
+    
+    /** Private methods **/
+
+    private CatalogBuilder getBuilder(){
+        return new CatalogBuilder(cat);
+    }
+    
+    private CatalogBuilder getBuilder(final WorkspaceInfo workspace){
+        return new CatalogBuilder(cat){{
+            setWorkspace(workspace);
+        }};        
+    }    
+
+    private CatalogBuilder getBuilder(final StoreInfo store){
+        return new CatalogBuilder(cat){{
+            setStore(store);
+        }};        
+    }
+    
+    private WorkspaceInfo newWorkspace(String name){
+        WorkspaceInfo ws = cat.getFactory().createWorkspace();
+        ws.setName(name);          
+        return ws;
+    }
+
+    private NamespaceInfo newNamespace(String prefix,String uri) {
+        NamespaceInfo ns = cat.getFactory().createNamespace();
+        ns.setPrefix(prefix);
+        ns.setURI(uri);           
+        return ns;
+    }
+
+    private WMSStoreInfo newWmsStore(WorkspaceInfo ws,final String name,final String url,final String usr, final String pwd) {       
+        WMSStoreInfo st = cat.getFactory().createWebMapServer();
+        st.setName(name);
+        st.setCapabilitiesURL(url);
+        st.setWorkspace(ws);
+        st.setEnabled(true);
+        st.setUsername(usr);
+        st.setPassword(pwd);
+        st.setType("WMS");
+        st.setEnabled(true);
+        return st;
+    }
+    
+    private DataStoreInfo newDataStoreInfo(WorkspaceInfo ws,final String name, String type){        
+        CatalogBuilder b = getBuilder(ws);
+        return b.buildDataStore(name);
+    }
+    
+    private LayerGroupInfo newLayerGroup(WorkspaceInfo ws, String name){
+        LayerGroupInfo lg=cat.getFactory().createLayerGroup();
+        lg.setWorkspace(ws);
+        lg.setName(name);
+        return lg;
+    }
+
+    private WMSLayerInfo newWmsLayerInfo(String workspace,String store,final String layer,final String name,final String title,String srs, ProjectionPolicy policy) throws IOException{
+        WMSStoreInfo st = cat.getStoreByName(workspace, store, WMSStoreInfo.class);
+        CatalogBuilder b = getBuilder(st);        
+        WMSLayerInfo l = b.buildWMSLayer(name);
+        l.setTitle(title);
+        l.setName(layer);
+        l.setSRS(srs);
+        l.setProjectionPolicy(policy);
+        l.setEnabled(true);                
+        cat.add(l);
+        cat.add(b.buildLayer(l));
+        return l;
+    }
+    
+    private FeatureTypeInfo newSqlFeatureTypeInfo(String workspace,String store,String name,String sql, List<VTGeometryTuple> geomEncList, List<VTParameterTuple> paramEncList) throws Exception{
+        DataStoreInfo st = cat.getStoreByName(workspace, store, DataStoreInfo.class);
+        JDBCDataStore ds = (JDBCDataStore)st.getDataStore(null);
+        CatalogBuilder b = getBuilder(st);     
+        VirtualTable vt = newVirtualTable(name,sql,geomEncList,paramEncList);
+        ds.createVirtualTable(vt);
+        FeatureTypeInfo ft = b.buildFeatureType(ds.getFeatureSource(vt.getName()));
+        ft.getMetadata().put(FeatureTypeInfo.JDBC_VIRTUAL_TABLE, vt);
+        
+        //This is a trick to generate NativeBoundingBox from db data
+        ft.setNativeBoundingBox(new ReferencedEnvelope());
+        ReferencedEnvelope box = b.getNativeBounds(ft);       
+        ft.setNativeBoundingBox(box);
+        ft.setLatLonBoundingBox(b.getLatLonBounds(box, box.getCoordinateReferenceSystem()));
+        
+        cat.add(ft);
+        cat.add(b.buildLayer(ft));        
+        return ft;
+    }
+
+    private VirtualTable newVirtualTable(String name, String sql,List<VTGeometryTuple> geoms,List<VTParameterTuple> pars){
+        VirtualTable vt=new VirtualTable(name, sql);
+        for(VTGeometryTuple g:geoms)
+            vt.addGeometryMetadatata(g.getName(),Geometries.getForName(g.getGeometryType()).getBinding(),Converters.convert(g.getSrid(), Integer.class));    
+        for(VTParameterTuple p:pars)
+            vt.addParameter(new VirtualTableParameter(p.getName(), p.getDefaultValue(),new RegexpValidator(p.getRegexpValidator())));
+        return vt;
+    }
+
+    private FeatureTypeInfo newFeatureTypeInfo(String workspace,String store,String name, String srs) throws Exception{
+        DataStoreInfo st = cat.getStoreByName(workspace, store, DataStoreInfo.class);
+        JDBCDataStore ds = (JDBCDataStore)st.getDataStore(null);
+        CatalogBuilder b = getBuilder(st);        
+                
+        FeatureTypeInfo ft = b.buildFeatureType(ds.getFeatureSource(name));
+        
+        ft.setStore(cat.getStoreByName(workspace, store, StoreInfo.class));
+        ft.setName(name);
+        ft.setNativeName(name);
+        ft.setTitle(name);        
+        ReferencedEnvelope box = b.getNativeBounds(ft);       
+        ft.setNativeBoundingBox(box);
+        ft.setLatLonBoundingBox(b.getLatLonBounds(box, box.getCoordinateReferenceSystem()));
+        cat.add(ft);
+        cat.add(b.buildLayer(ft)); 
+        return ft;        
+    }    
 }

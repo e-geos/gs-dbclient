@@ -1,20 +1,23 @@
 package it.egeos.geoserver;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
-import org.geoserver.catalog.Catalog;
-import org.geoserver.catalog.WorkspaceInfo;
+import org.geotools.geometry.jts.Geometries;
+import org.geotools.referencing.CRS;
 
 import it.egeos.geoserver.dbmanagers.GeoserverManager;
-import it.egeos.geoserver.restmanagers.tuples.LayerGroupTuple;
 import it.egeos.geoserver.restmanagers.tuples.LayerTuple;
+import it.egeos.geoserver.restmanagers.tuples.SqlLayerTuple;
 import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
+import it.egeos.geoserver.restmanagers.tuples.StyleTuple;
+import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
+import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
 import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
-
 
 public class Main {
 
-    @SuppressWarnings("serial")
+    @SuppressWarnings({ "deprecation", "serial" })
     public static void main(String[] args) throws Exception {
 
 
@@ -25,31 +28,94 @@ public class Main {
         GeoserverManager gm=new GeoserverManager(dbUser, dbPasswd, connectionUrl);
         
         System.out.println("Prima");
-        Catalog cat = gm.getCat();
+
         
         WorkspaceTuple ws= new WorkspaceTuple("c1p");
         
         gm.addWorkspace(ws.name);
-        gm.createPostgisStore(ws, "bbbb", "localhost", 5432, "geoviewer", "geoviewer","miofratelloefigliounico");
+
+        //DataStore
+        gm.createPostgisStore(ws, "postgis", "localhost", 5432,dbUser,dbUser,dbPasswd);
+        
+        //SQLView
+        gm.createSqlLayer(
+            new SqlLayerTuple(
+                "sqlview", 
+                "sqlview",
+                new StoreTuple("postgis", null, new WorkspaceTuple(ws.name)), 
+                "select * from \"c1p\".\"66006_Zone_Protezione_Speciale\"", 
+                new ArrayList<VTGeometryTuple>(){{
+                    add(new VTGeometryTuple("the_geom",Geometries.GEOMETRY.getName(), "32633"));
+                }}, 
+                new ArrayList<VTParameterTuple>(){{
+                    
+                }}
+            )
+        );
+        
+        //PostgisLayer
+        gm.linkPGTable(new LayerTuple("66006_Parchi_e_Riserve", "postgis_layer", new StoreTuple("postgis", "", new WorkspaceTuple(ws.name))), "EPSG:3857");
+        gm.assignStyle(ws.name, "66006_Parchi_e_Riserve", "green");
+        gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "line");
+        gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "geo:pippo2");
+        gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "burg");
+        
+        gm.removeStyle(ws.name, "66006_Parchi_e_Riserve", "burg");
+        
+        //WMSStore
         gm.createWmsStore(ws, "aaaa", "http://share.egeos-services.it/reflector/dev2/service", null, null);
+        
+        //WMSLayer
+        gm.addWmsLayer(ws.name, "aaaa", "rv2", "rv2", "rv2", new HashMap<String, String>(){{
+            put("srs","EPSG:3857");
+            put("projectionPolicy","REPROJECT_TO_DECLARED");
+        }});
+        
+        //Layergroup
+        gm.createLayerGroup(ws, "lg_ws00",new ArrayList<LayerTuple>(){{
+            add(new LayerTuple("rv2", "rv2",new StoreTuple("aaaa","", new WorkspaceTuple(ws.name))));
+        }});
         
         System.out.println("Cerco 'aaaa' "+(gm.getWmsStore(ws.name, "aaaa")!=null?"trovato":"mancante"));
         System.out.println("Cerco 'bbbb' come WMSStore "+(gm.getWmsStore(ws.name, "bbbb")!=null?"trovato":"mancante"));
-        //add layer 1
         
         
-        gm.createLayerGroup(ws, "lg_ws00",new ArrayList<LayerTuple>(){{
-            //add layer 1 in lg
-        }});
         
         
-        gm.deleteStore(ws, "bbbb");
-        gm.deleteStore(ws, "aaaa");
-        gm.deleteLayerGroup(ws.name,"lg_ws00");
-        gm.deleteWorkspace("c1p");
+        System.out.println("Features in "+ws.name);
+        ArrayList<LayerTuple> fls = gm.getFeatureLayersList(ws.name);
+        for(LayerTuple l:fls){
+            System.out.println("\t"+l);
+            for(StyleTuple s:gm.getLayerStyles(ws.name,l.name))
+               System.out.println("\t\tS:"+s.workspace+"."+s.name);
+            System.out.println("\t\tDef: "+gm.getDefaultStyle(ws.name,l.name));
+            
+        }
+        System.out.println("Coverages in "+ws.name);
+        ArrayList<LayerTuple> fls1 = gm.getCoverageLayersList(ws.name);
+        for(LayerTuple l:fls1) 
+            System.out.println("\t"+l);
+
+        System.out.println("WMSs in "+ws.name);
+        ArrayList<LayerTuple> fls2 = gm.getWmsLayersList(ws.name);
+        for(LayerTuple l:fls2){ 
+            System.out.println("\t"+l);            
+        }
+
+        System.out.println("Styles for "+gm.getDefaultStyle("geo","66006_Parchi_e_Riserve"));
+        for(StyleTuple s:gm.getLayerStyles("geo","66006_Parchi_e_Riserve"))
+            System.out.println("\t\tS:"+s.workspace+"."+s.name);
+        
+/*        */
         
         
-        for(WorkspaceInfo w:cat.getWorkspaces()){
+        //gm.deleteStore(ws, "bbbb");
+        //gm.deleteStore(ws, "aaaa");
+        //gm.deleteLayerGroup(ws.name,"lg_ws00");
+        //gm.deleteWorkspace("c1p");
+        
+        
+/*        for(WorkspaceInfo w:cat.getWorkspaces()){
             System.out.println("w: "+w.getName());
             
             System.out.println("\tdatastores:");            
@@ -73,7 +139,7 @@ public class Main {
             }
 
             
-        }
+        }*/
         
        
 
