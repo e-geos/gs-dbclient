@@ -28,7 +28,7 @@ public class Main {
         String dbUser="geoviewer";
         String dbPasswd="miofratelloefigliounico";
         
-        GeoserverManager gm=new GeoserverManager(dbUser, dbPasswd, connectionUrl);
+        GeoserverManager gm=new GeoserverManager(dbUser, dbPasswd, connectionUrl,GeoserverManager.DRIVER_POSTGRESQL);
         
         System.out.println("Prima");
 

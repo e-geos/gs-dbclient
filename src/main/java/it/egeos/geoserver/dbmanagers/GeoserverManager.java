@@ -56,14 +56,15 @@ import it.egeos.geoserver.restmanagers.types.StoreTypes;
 
 public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     private Catalog cat; 
-    private String driver="org.postgresql.Driver";
+    
+    public static String DRIVER_POSTGRESQL="org.postgresql.Driver";
     
     //Available access mode
     public final static char ADMIN='a'; 
     public final static char READ='r';
     public final static char WRITE='w';
     
-    public GeoserverManager(String login, String password, String url) {
+    public GeoserverManager(String login, String password, String url,String driver) {
         super(login,password,url);
         try {
             cat = CatalogLoader.getCatalog(driver, url, login, password);
@@ -193,8 +194,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     }
     
     /** LAYERGROUPS **/
-    
-
+   
     public LayerGroupInfo createLayerGroup(final WorkspaceTuple workspace,final String layer,final List<LayerTuple> subs){
         LayerGroupInfo lg = newLayerGroup(cat.getWorkspaceByName(workspace.name),layer);        
         if(lg!=null){
@@ -240,9 +240,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
             cat.save(lg);
         }        
     }
-    
-    
-    
+   
     @Override    
     public Boolean deleteLayerGroup(String workspace,String layer){
         deleteLayerGroup(cat.getLayerGroupByName(workspace, layer));            
@@ -748,42 +746,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return createStyleInfo(null,name,sld)!=null;
     }
     
-    //TODO: verify from here
-
-
-    
-    
-    
-        
- 
-
-
-    
-
-    
-
-
-  
-            
-
-        
-
-        
-
-
-
-    
-
-
-
-
-
-
-
-    
-
-    
-
+    //TODO: unimplementd
                
     @Override    
     public ArrayList<String> getRoles(){
@@ -965,10 +928,6 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         //TODO
         return null;
     }
-
-
-  
-
 
     @Override    
     public ArrayList<String> getUsers(){    
