@@ -2,11 +2,13 @@ package it.egeos.geoserver;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 
 import org.geotools.geometry.jts.Geometries;
 import org.geotools.referencing.CRS;
 
 import it.egeos.geoserver.dbmanagers.GeoserverManager;
+import it.egeos.geoserver.restmanagers.tuples.LayerGroupTuple;
 import it.egeos.geoserver.restmanagers.tuples.LayerTuple;
 import it.egeos.geoserver.restmanagers.tuples.SqlLayerTuple;
 import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
@@ -14,6 +16,7 @@ import it.egeos.geoserver.restmanagers.tuples.StyleTuple;
 import it.egeos.geoserver.restmanagers.tuples.VTGeometryTuple;
 import it.egeos.geoserver.restmanagers.tuples.VTParameterTuple;
 import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
+import it.egeos.geoserver.restmanagers.types.StoreTypes;
 
 public class Main {
 
@@ -38,7 +41,7 @@ public class Main {
         gm.createPostgisStore(ws, "postgis", "localhost", 5432,dbUser,dbUser,dbPasswd);
         
         //SQLView
-        gm.createSqlLayer(
+        gm.addSQLLayer(
             new SqlLayerTuple(
                 "sqlview", 
                 "sqlview",
@@ -58,28 +61,61 @@ public class Main {
         gm.assignStyle(ws.name, "66006_Parchi_e_Riserve", "green");
         gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "line");
         gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "geo:pippo2");
-        gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "burg");
-        
+        gm.assignOptStyle(ws.name, "66006_Parchi_e_Riserve", "burg");        
         gm.removeStyle(ws.name, "66006_Parchi_e_Riserve", "burg");
+        
+        gm.linkPGTable(new LayerTuple("66006_Zone_Protezione_Speciale", "postgis_layer", new StoreTuple("postgis", "", new WorkspaceTuple(ws.name))), "EPSG:3857");
+        
+        gm.removeShapefile(ws.name, "66006_Zone_Protezione_Speciale");
         
         //WMSStore
         gm.createWmsStore(ws, "aaaa", "http://share.egeos-services.it/reflector/dev2/service", null, null);
         
         //WMSLayer
-        gm.addWmsLayer(ws.name, "aaaa", "rv2", "rv2", "rv2", new HashMap<String, String>(){{
+        gm.addWmsLayer(ws.name, "aaaa", "rv2", "rv2_name", "rv2_title", new HashMap<String, String>(){{
+            put("srs","EPSG:3857");
+            put("projectionPolicy","REPROJECT_TO_DECLARED");
+        }});
+
+        gm.addWmsLayer(ws.name, "aaaa", "rv2", "rv2_todelete", "rv2_todelete", new HashMap<String, String>(){{
+            put("srs","EPSG:3857");
+            put("projectionPolicy","REPROJECT_TO_DECLARED");
+        }});
+
+        
+        gm.addWmsLayer(ws.name, "aaaa", "rv1", "rv1", "rv1", new HashMap<String, String>(){{
             put("srs","EPSG:3857");
             put("projectionPolicy","REPROJECT_TO_DECLARED");
         }});
         
+        gm.updateSQLLayer(
+            new SqlLayerTuple(
+                "sqlview", 
+                "rimpiazzo",
+                new StoreTuple("postgis", null, new WorkspaceTuple(ws.name)), 
+                "select * from \"c1p\".\"66006_Zone_Protezione_Speciale\" where 1=1", 
+                new ArrayList<VTGeometryTuple>(){{
+                    add(new VTGeometryTuple("the_geom",Geometries.GEOMETRY.getName(), "32633"));
+                }}, 
+                new ArrayList<VTParameterTuple>(){{
+                    
+                }}));
+        
+        gm.removeWmsLayer(ws.name, "aaaa", "rv2_todelete");
+        
         //Layergroup
         gm.createLayerGroup(ws, "lg_ws00",new ArrayList<LayerTuple>(){{
-            add(new LayerTuple("rv2", "rv2",new StoreTuple("aaaa","", new WorkspaceTuple(ws.name))));
+            add(new LayerTuple("sqlview", "rimpiazzo",new StoreTuple("postgis","", new WorkspaceTuple(ws.name))));
         }});
         
         System.out.println("Cerco 'aaaa' "+(gm.getWmsStore(ws.name, "aaaa")!=null?"trovato":"mancante"));
         System.out.println("Cerco 'bbbb' come WMSStore "+(gm.getWmsStore(ws.name, "bbbb")!=null?"trovato":"mancante"));
         
-        
+        gm.assignSubLayers(ws.name, "lg_ws00", new LinkedHashMap<LayerTuple, String>(){{
+            put(new LayerTuple("rv2_name", null, new StoreTuple("aaaa", StoreTypes.WMS, new WorkspaceTuple(ws.name))),"green");
+            put(new LayerTuple("rv2_name", null, new StoreTuple("aaaa", StoreTypes.WMS, new WorkspaceTuple(ws.name))),null);
+            put(new LayerTuple("rv2_name", null, new StoreTuple("aaaa", StoreTypes.WMS, new WorkspaceTuple(ws.name))),"grass");
+        }});
         
         
         System.out.println("Features in "+ws.name);
@@ -101,6 +137,16 @@ public class Main {
         for(LayerTuple l:fls2){ 
             System.out.println("\t"+l);            
         }
+        
+        System.out.println("LayerGroups in "+ws.name);
+        for(LayerGroupTuple lg:gm.getLayerGroups(ws.name)){
+            System.out.println("\t"+lg.getName()+" ("+lg.getTitle()+")");
+            LinkedHashMap<LayerTuple, StyleTuple> subs = gm.getSubLayers(ws.name, lg.getName());
+            for(LayerTuple sl:subs.keySet()){
+                System.out.println("\t\t"+sl.name+" "+subs.get(sl));
+            }
+        }
+        
 
         System.out.println("Styles for "+gm.getDefaultStyle("geo","66006_Parchi_e_Riserve"));
         for(StyleTuple s:gm.getLayerStyles("geo","66006_Parchi_e_Riserve"))

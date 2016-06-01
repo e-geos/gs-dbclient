@@ -181,19 +181,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         cat.add(st);
         return st.getId();
     }
-    
-    @SuppressWarnings("serial")
-    public LayerGroupInfo createLayerGroup(final WorkspaceTuple workspace,final String layer,final List<LayerTuple> subs){
-        LayerGroupInfo lg = newLayerGroup(cat.getWorkspaceByName(workspace.name),layer);        
-        assignSubLayers(lg, new LinkedHashMap<PublishedInfo, String>(){{
-            for(LayerTuple s:subs)
-                put(s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name),null);
-        }});        
-        cat.add(lg);        
-        return lg;
-        
-    }
-    
+
     public void deleteStore(final WorkspaceTuple workspace,String name){       
         deleteStore(cat.getStoreByName(workspace.name, name, StoreInfo.class));
     }
@@ -202,6 +190,57 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         CatalogBuilder b = getBuilder(st);
         b.removeStore(st, true);
     }
+    
+    /** LAYERGROUPS **/
+    
+
+    public LayerGroupInfo createLayerGroup(final WorkspaceTuple workspace,final String layer,final List<LayerTuple> subs){
+        LayerGroupInfo lg = newLayerGroup(cat.getWorkspaceByName(workspace.name),layer);        
+        if(lg!=null){
+            for(LayerTuple s:subs){
+                PublishedInfo l = s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name);                
+                lg.getLayers().add(l);            
+                lg.getStyles().add(null);           
+            }
+            try {
+                getBuilder().calculateLayerGroupBounds(lg);
+            }
+            catch (Exception e) {
+                log.error("Can't calculateLayerGroupBounds of a layergroup in '"+lg.getWorkspace().getName()+"' with name '"+lg.getName()+"': "+e.getMessage(), e);            
+            }
+        }
+        cat.add(lg);        
+        return lg;        
+    }
+    
+    /*
+     * Sets 'publishables' and 'styles' using subs, a <name,style> list 
+     */  
+    public void setSubLayers(String workspace,String glayer,final LinkedHashMap<LayerTuple, String> subs){
+        LayerGroupInfo lg = cat.getLayerGroupByName(workspace, glayer);
+        System.out.println("Trovato "+lg);
+        
+        if(lg!=null){
+            lg.getLayers().clear();
+            lg.getStyles().clear();
+            for(LayerTuple s:subs.keySet()){
+                PublishedInfo l = s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name);
+                System.out.println("L: "+s.name+" "+l);
+                String style=subs.get(s);                
+                lg.getLayers().add(l);            
+                lg.getStyles().add(style!=null?cat.getStyleByName(style):null);           
+            }
+            try {
+                getBuilder().calculateLayerGroupBounds(lg);
+            }
+            catch (Exception e) {
+                log.error("Can't calculateLayerGroupBounds of a layergroup in '"+lg.getWorkspace().getName()+"' with name '"+lg.getName()+"': "+e.getMessage(), e);            
+            }
+            cat.save(lg);
+        }        
+    }
+    
+    
     
     @Override    
     public Boolean deleteLayerGroup(String workspace,String layer){
@@ -212,6 +251,26 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     public void deleteLayerGroup(LayerGroupInfo lg) {    
         cat.remove(lg);        
     }
+    
+    /*
+     * returns a list of <name,style> merging 'publishables' and 'styles' properties 
+     */  
+    @Override    
+    @SuppressWarnings("serial")
+    public LinkedHashMap<LayerTuple,StyleTuple> getSubLayers(final String workspace,final String layergroup){
+        return new LinkedHashMap<LayerTuple,StyleTuple>(){{
+            LayerGroupInfo lg = cat.getLayerGroupByName(workspace, layergroup);            
+            List<PublishedInfo> lys = lg.getLayers();
+            List<StyleInfo> sts = lg.getStyles();
+            for(int i=0;i<lys.size();i++){
+                PublishedInfo l = lys.get(i);
+                StyleInfo si = sts.get(i);                
+                LayerTuple lt = new LayerTuple(l.getName(), l.getTitle(), new StoreTuple());
+                StyleTuple st = si!=null?new StyleTuple(si.getName(), si.getFormat(), si.getFilename(), new WorkspaceTuple(si.getWorkspace().getName())):null;
+                put(lt,st);
+            }            
+        }};
+     }    
     
     /** Layers **/
     @SuppressWarnings("serial")
@@ -295,14 +354,10 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
 
     public FeatureTypeInfo createFeatureType(final LayerTuple lt,final String nativeCRS) throws Exception{
         StoreTuple st = lt.store;        
-        return newFeatureTypeInfo(st.workspace.name, st.name, lt.name,nativeCRS);
+        return newFeatureTypeInfo(st.workspace.name, st.name, lt.name,lt.title,nativeCRS);
     }
-    
-    public WMSLayerInfo createWmsLayer(String workspace,String store,final String layer,final String name,final String title, String srs, ProjectionPolicy policy) throws Exception{
-        return newWmsLayerInfo(workspace,store,layer,name,title,srs,policy);
-    }
-        
-    public FeatureTypeInfo createSqlLayer(final SqlLayerTuple slt) throws Exception{
+
+    public FeatureTypeInfo createFeatureType(final SqlLayerTuple slt) throws Exception{
         return newSqlFeatureTypeInfo(
             slt.store.workspace.name,
             slt.store.name,
@@ -311,6 +366,49 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
             slt.geomEncList,
             slt.paramEncList
         );
+    }
+    
+    public void deleteFeatureType(String workspace, String name){        
+        FeatureTypeInfo ft = cat.getFeatureTypeByName(workspace, name);        
+        for(LayerInfo l:cat.getLayers(ft))
+            cat.remove(l);
+        getBuilder().removeResource(ft,true);
+    }
+    
+    public WMSLayerInfo createWmsLayer(String workspace,String store,final String layer,final String name,final String title, String srs, ProjectionPolicy policy) throws Exception{
+        return newWmsLayerInfo(workspace,store,layer,name,title,srs,policy);
+    }
+      
+    public void deleteWmsLayer(String workspace,String store,String layerName){  
+        WMSLayerInfo res = cat.getResourceByStore(cat.getStoreByName(workspace, store, WMSStoreInfo.class), layerName, WMSLayerInfo.class);        
+        for(LayerInfo l:cat.getLayers(res))
+            cat.remove(l);
+        getBuilder().removeResource(res, true);                
+    }
+        
+    public void deleteCoverageLayer(String workspace,String name){
+        CoverageInfo ci = cat.getCoverageByName(workspace, name);        
+        for(LayerInfo l:cat.getLayers(ci))
+            cat.remove(l);
+        getBuilder().removeResource(ci,true);    
+    }
+        
+    @Override    
+    public boolean updateSQLLayer(final SqlLayerTuple slt){
+        FeatureTypeInfo ft=cat.getFeatureTypeByDataStore(cat.getDataStoreByName(slt.store.workspace.name, slt.store.name), slt.name);
+        ft.setTitle(slt.title);
+        ft.getMetadata().put(
+            FeatureTypeInfo.JDBC_VIRTUAL_TABLE, 
+            newVirtualTable(
+                slt.name,
+                slt.sql,
+                slt.geomEncList,
+                slt.paramEncList
+            )
+        );
+        
+        cat.save(ft);
+        return false;
     }
     
     @SuppressWarnings("serial")
@@ -362,6 +460,32 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         
         l.getStyles().remove(st);
         cat.save(l);
+    }
+    
+    
+    @Override    
+    public String prefixName(String name){
+        String res=null;
+        try {
+            String[] parts = name.split(":");
+            res=parts.length>1? parts[0]:null;         
+        } 
+        catch (ArrayIndexOutOfBoundsException|NullPointerException e) {
+            //name is null so no split is needed or no contains :
+        }       
+        return res;
+    }
+    
+    @Override    
+    public String trimName(String name){
+        String res=name;
+        try {
+            res=name.split(":")[1];         
+        } 
+        catch (ArrayIndexOutOfBoundsException|NullPointerException e) {
+            //name is null so no split is needed or no contains :
+        }       
+        return res;
     }
     
     /* Deprecated */ 
@@ -482,13 +606,13 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     }
     
     /**
-     * @deprecated replaced by {@link #createSqlLayer(final SqlLayerTuple slt)} 
+     * @deprecated replaced by {@link #createFeatureType(final SqlLayerTuple slt)} 
      */
     @Deprecated
     @Override    
     public boolean addSQLLayer(final SqlLayerTuple slt) {
         try {
-            return createSqlLayer(slt)!=null;
+            return createFeatureType(slt)!=null;
         }
         catch (Exception e) {
             log.error("Can't create sql layer: "+e.getMessage(), e);
@@ -559,6 +683,56 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return null;
     }
     
+    /**
+     * @deprecated replaced by {@link #deleteWmsLayer(String workspace,String store,String layerName)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean removeWmsLayer(String workspace,String store,String layerName){  
+        deleteWmsLayer(workspace, store, layerName);        
+        return true;
+    }
+    
+    /**
+     * @deprecated replaced by {@link #deleteFeatureType(String workspace, String name)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean removeShapefile(String workspace, String name){        
+        deleteFeatureType(workspace, name);
+        return false;
+    }
+
+    /**
+     * @deprecated replaced by {@link #deleteFeatureType(String workspace, String name)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean removeFeatureType(String workspace, String storename, String layerName){
+        deleteFeatureType(workspace, layerName);
+        return true;
+    }
+
+    /**
+     * @deprecated replaced by {@link #deleteCoverageLayer(String workspace,String name)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean removeCoverageLayer(String workspace, String storename, String name){
+        deleteCoverageLayer(workspace, name);
+        return true;
+    }
+
+    /**
+     * @deprecated replaced by {@link #setSubLayers(String workspace,String glayer,final LinkedHashMap<LayerTuple, String> subs)} 
+     */
+    @Deprecated
+    @Override    
+    public Boolean assignSubLayers(String workspace,String glayer,LinkedHashMap<LayerTuple, String> children){
+        setSubLayers(workspace, glayer, children);
+        return true;
+    }
+    
     //TODO: verify from here
 
 
@@ -568,102 +742,19 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         
  
 
-    /*
-        * returns a list of <name,style> merging 'publishables' and 'styles' properties 
-        */  
-    @Override    
-    @SuppressWarnings("serial")
-    public LinkedHashMap<LayerTuple,StyleTuple> getSubLayers(final String workspace,final String layergroup){
-        return new LinkedHashMap<LayerTuple,StyleTuple>(){{
-            LayerGroupInfo lg = cat.getLayerGroupByName(workspace, layergroup);            
-            List<PublishedInfo> lys = lg.getLayers();
-            List<StyleInfo> sts = lg.getStyles();
-            for(int i=0;i<lys.size();i++){
-                PublishedInfo l = lys.get(i);
-                StyleInfo si = sts.get(i);                
-                LayerTuple lt = new LayerTuple(l.getName(), l.getTitle(), new StoreTuple());
-                StyleTuple st = si!=null?new StyleTuple(si.getName(), si.getFormat(), si.getFilename(), new WorkspaceTuple(si.getWorkspace().getName())):null;
-                put(lt,st);
-            }            
-        }};
-    }
-    
-    @Override    
-    public String prefixName(String name){
-        String res=null;
-        try {
-            String[] parts = name.split(":");
-            res=parts.length>1? parts[0]:null;         
-        } 
-        catch (ArrayIndexOutOfBoundsException|NullPointerException e) {
-            //name is null so no split is needed or no contains :
-        }       
-        return res;
-    }
-    
-    @Override    
-    public String trimName(String name){
-        String res=name;
-        try {
-            res=name.split(":")[1];         
-        } 
-        catch (ArrayIndexOutOfBoundsException|NullPointerException e) {
-            //name is null so no split is needed or no contains :
-        }       
-        return res;
-    }
-    
-    /*
-     * Sets 'publishables' and 'styles' using subs, a <name,style> list 
-     */  
-    @Override    
-    @SuppressWarnings("serial")
-    public Boolean assignSubLayers(String workspace,String glayer,final LinkedHashMap<LayerTuple, String> subs){
-        LayerGroupInfo lg = cat.getLayerGroupByName(workspace, glayer);
-        if(lg!=null)
-            assignSubLayers(lg, new LinkedHashMap<PublishedInfo, String>(){{
-                for(LayerTuple s:subs.keySet())
-                    put(s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name),subs.get(s));
-            }});
-        cat.save(lg);
-        return true;
-    }
 
-    private void assignSubLayers(LayerGroupInfo lg,LinkedHashMap<PublishedInfo, String> subs){        
-        for(PublishedInfo l:subs.keySet()){
-            String style=subs.get(l);
-            lg.getLayers().add(l);            
-            lg.getStyles().add(style!=null?cat.getStyleByName(style):null);           
-        }
-        try {
-            getBuilder().calculateLayerGroupBounds(lg);
-        }
-        catch (Exception e) {
-            log.error("Can't create a layergroup in '"+lg.getWorkspace().getName()+"' with name '"+lg.getName()+"': "+e.getMessage(), e);            
-        }
-    }
-            
+    
+
+    
+
+
+  
             
 
         
 
         
-    @Override    
-    public boolean updateSQLLayer(final SqlLayerTuple slt){
-        FeatureTypeInfo ft=cat.getFeatureTypeByDataStore(cat.getDataStoreByName(slt.store.workspace.name, slt.store.name), slt.name);
-        ft.getMetadata().put(
-            FeatureTypeInfo.JDBC_VIRTUAL_TABLE, 
-            newVirtualTable(
-                slt.name,
-                slt.sql,
-                slt.geomEncList,
-                slt.paramEncList
-            )
-        );
-        
-        cat.save(ft);
-        return false;
-    }
+
 
 
     
@@ -675,19 +766,9 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
 
 
     
-    @Override    
-    public boolean removeWmsLayer(String workspace,String store,String layerName){
-        cat.remove(cat.getResourceByStore(cat.getStoreByName(workspace, store, WMSStoreInfo.class), layerName, WMSLayerInfo.class));
-        return false;
-    }
+
     
-    @Override    
-    public boolean removeShapefile(String workspace, String layerName){
-        LayerInfo l = cat.getLayer(layerName);
-        cat.remove(l);
-        //TODO: workspace is for compatibility
-        return false;
-    }
+
                
     @Override    
     public ArrayList<String> getRoles(){
@@ -959,28 +1040,6 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return null;
     }
     
-    @Override    
-    public String getSrsLayer(String layerName){        
-        //TODO
-        return null;
-    }
-    
-
-
-    
-    @Override    
-    public boolean removeFeatureType(String workspace, String storename, String layerName){
-        //TODO
-        return false;
-    }
-    
-    @Override    
-    public boolean removeCoverageLayer(String workspace, String storename, String layerName){
-        //TODO
-        return false;
-    }
-    
-
     
     /** Private methods **/
 
@@ -1041,9 +1100,10 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     private WMSLayerInfo newWmsLayerInfo(String workspace,String store,final String layer,final String name,final String title,String srs, ProjectionPolicy policy) throws IOException{
         WMSStoreInfo st = cat.getStoreByName(workspace, store, WMSStoreInfo.class);
         CatalogBuilder b = getBuilder(st);        
-        WMSLayerInfo l = b.buildWMSLayer(name);
+        WMSLayerInfo l = b.buildWMSLayer(layer);
         l.setTitle(title);
-        l.setName(layer);
+        l.setName(name);
+        l.setNativeName(layer);
         l.setSRS(srs);
         l.setProjectionPolicy(policy);
         l.setEnabled(true);                
@@ -1081,7 +1141,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return vt;
     }
 
-    private FeatureTypeInfo newFeatureTypeInfo(String workspace,String store,String name, String srs) throws Exception{
+    private FeatureTypeInfo newFeatureTypeInfo(String workspace,String store,String name,String title, String srs) throws Exception{
         DataStoreInfo st = cat.getStoreByName(workspace, store, DataStoreInfo.class);
         JDBCDataStore ds = (JDBCDataStore)st.getDataStore(null);
         CatalogBuilder b = getBuilder(st);        
@@ -1091,7 +1151,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         ft.setStore(cat.getStoreByName(workspace, store, StoreInfo.class));
         ft.setName(name);
         ft.setNativeName(name);
-        ft.setTitle(name);        
+        ft.setTitle(title);        
         ReferencedEnvelope box = b.getNativeBounds(ft);       
         ft.setNativeBoundingBox(box);
         ft.setLatLonBoundingBox(b.getLatLonBounds(box, box.getCoordinateReferenceSystem()));
