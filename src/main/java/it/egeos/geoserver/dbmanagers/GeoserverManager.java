@@ -24,6 +24,7 @@ import org.geoserver.catalog.StyleInfo;
 import org.geoserver.catalog.WMSLayerInfo;
 import org.geoserver.catalog.WMSStoreInfo;
 import org.geoserver.catalog.WorkspaceInfo;
+import org.geoserver.catalog.impl.StyleInfoImpl;
 import org.geotools.geometry.jts.Geometries;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.jdbc.JDBCDataStore;
@@ -462,31 +463,27 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         cat.save(l);
     }
     
+    /** Styles **/
     
+    @SuppressWarnings("serial")
     @Override    
-    public String prefixName(String name){
-        String res=null;
-        try {
-            String[] parts = name.split(":");
-            res=parts.length>1? parts[0]:null;         
-        } 
-        catch (ArrayIndexOutOfBoundsException|NullPointerException e) {
-            //name is null so no split is needed or no contains :
-        }       
-        return res;
+    public ArrayList<StyleTuple> getAllStyles(){        
+        return new ArrayList<StyleTuple>(){{
+            for(StyleInfo s:cat.getStyles()){
+                WorkspaceInfo ws = s.getWorkspace();                                
+                add(new StyleTuple(s.getName(), s.getFormat(), s.getFilename(),ws!=null?new WorkspaceTuple(ws.getName()):null));
+            }
+        }};
     }
     
-    @Override    
-    public String trimName(String name){
-        String res=name;
-        try {
-            res=name.split(":")[1];         
-        } 
-        catch (ArrayIndexOutOfBoundsException|NullPointerException e) {
-            //name is null so no split is needed or no contains :
-        }       
-        return res;
+    public StyleInfo createStyleInfo(String workspace,String name,String sld){
+        //TODO: gestire upload file
+        return newStyleInfo(cat.getWorkspaceByName(workspace),name,sld);
     }
+    
+    
+    
+
     
     /* Deprecated */ 
 
@@ -733,6 +730,24 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return true;
     }
     
+    /**
+     * @deprecated replaced by {@link #createStyleInfo(String workspace,String name,String sld)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean upload(String name,String sld,String workspace){
+        return createStyleInfo(workspace,name,sld)!=null;
+    }
+
+    /**
+     * @deprecated replaced by {@link #createStyleInfo(String workspace,String name,String sld)} 
+     */
+    @Deprecated
+    @Override    
+    public boolean upload(String name,String sld){
+        return createStyleInfo(null,name,sld)!=null;
+    }
+    
     //TODO: verify from here
 
 
@@ -951,34 +966,9 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return null;
     }
 
-    @Override    
-    public ArrayList<StyleTuple> getAllStyles(){        
-        //TODO
-        return null;
-    }
-    
-    @Override    
-    public ArrayList<StyleTuple> getStyles(){
-        return getStyles(null);
-    }
-    
-    @Override    
-    public ArrayList<StyleTuple> getStyles(final String workspace){
-        //TODO
-        return null;
-    }
 
-    @Override    
-    public boolean upload(String name,String sld,String workspace){
-        //TODO
-        return false;
-    }
+  
 
-    @Override    
-    public boolean upload(String name,String sld){
-        //TODO
-        return false;
-    }
 
     @Override    
     public ArrayList<String> getUsers(){    
@@ -1159,4 +1149,18 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         cat.add(b.buildLayer(ft)); 
         return ft;        
     }    
+
+    private StyleInfo newStyleInfo(WorkspaceInfo ws,String name,String filename){
+        StyleInfoImpl style=new StyleInfoImpl(cat);
+        style.setName(name);        
+        style.setWorkspace(ws);
+        style.setFilename(filename);
+        
+        if(cat.validate(style, true).isValid())
+            cat.add(style);
+        else
+            style=null;
+        
+        return style;
+    }
 }

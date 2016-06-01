@@ -111,12 +111,15 @@ public class Main {
         System.out.println("Cerco 'aaaa' "+(gm.getWmsStore(ws.name, "aaaa")!=null?"trovato":"mancante"));
         System.out.println("Cerco 'bbbb' come WMSStore "+(gm.getWmsStore(ws.name, "bbbb")!=null?"trovato":"mancante"));
         
-        gm.assignSubLayers(ws.name, "lg_ws00", new LinkedHashMap<LayerTuple, String>(){{
+/*        gm.assignSubLayers(ws.name, "lg_ws00", new LinkedHashMap<LayerTuple, String>(){{
             put(new LayerTuple("rv2_name", null, new StoreTuple("aaaa", StoreTypes.WMS, new WorkspaceTuple(ws.name))),"green");
             put(new LayerTuple("rv2_name", null, new StoreTuple("aaaa", StoreTypes.WMS, new WorkspaceTuple(ws.name))),null);
             put(new LayerTuple("rv2_name", null, new StoreTuple("aaaa", StoreTypes.WMS, new WorkspaceTuple(ws.name))),"grass");
-        }});
-        
+        }});*/
+
+        gm.upload("Munfio", "europa/green.sld");
+        gm.upload("Elvio", "burg.sld",ws.name);        
+
         
         System.out.println("Features in "+ws.name);
         ArrayList<LayerTuple> fls = gm.getFeatureLayersList(ws.name);
@@ -146,11 +149,12 @@ public class Main {
                 System.out.println("\t\t"+sl.name+" "+subs.get(sl));
             }
         }
+
+        System.out.println("Styles");
+        for(StyleTuple s:gm.getAllStyles())
+            System.out.println("\t\tS:"+s.workspace+"."+s.name);
         
 
-        System.out.println("Styles for "+gm.getDefaultStyle("geo","66006_Parchi_e_Riserve"));
-        for(StyleTuple s:gm.getLayerStyles("geo","66006_Parchi_e_Riserve"))
-            System.out.println("\t\tS:"+s.workspace+"."+s.name);
         
 /*        */
         
