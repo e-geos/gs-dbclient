@@ -110,7 +110,7 @@ public class Main {
 */
         
         gm.assignSubLayers("geo", "lg001", new LinkedHashMap<LayerTuple, String>(){{
-            put(new LayerTuple("66006_Parchi_e_Riserve", null, new StoreTuple("postgis", StoreTypes.DATA,new WorkspaceTuple( "geo"))),"green");
+            put(new LayerTuple("66006_Parchi_e_Riserve", null, new StoreTuple("postgis", StoreTypes.DATA,new WorkspaceTuple( "geo"))),"line");
             put(new LayerTuple("66006_Zone_Protezione_Speciale", null, new StoreTuple("postgis", StoreTypes.DATA,new WorkspaceTuple( "geo"))),null);
         }});
         

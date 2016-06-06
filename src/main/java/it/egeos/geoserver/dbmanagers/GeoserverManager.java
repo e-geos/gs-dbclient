@@ -231,7 +231,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
                 PublishedInfo l = s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name);
                 String style=subs.get(s);                
                 detached.getLayers().add(l);            
-                detached.getStyles().add(style!=null?cat.getStyleByName(style):null);           
+                detached.getStyles().add(style!=null?cat.getStyleByName(style):null);                                      
             }
             try {
                 getBuilder().calculateLayerGroupBounds(detached);
