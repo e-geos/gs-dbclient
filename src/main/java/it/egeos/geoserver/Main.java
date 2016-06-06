@@ -8,8 +8,10 @@ import org.geoserver.catalog.FeatureTypeInfo;
 import it.egeos.geoserver.dbmanagers.GeoserverManager;
 import it.egeos.geoserver.restmanagers.tuples.LayerGroupTuple;
 import it.egeos.geoserver.restmanagers.tuples.LayerTuple;
+import it.egeos.geoserver.restmanagers.tuples.StoreTuple;
 import it.egeos.geoserver.restmanagers.tuples.StyleTuple;
 import it.egeos.geoserver.restmanagers.tuples.WorkspaceTuple;
+import it.egeos.geoserver.restmanagers.types.StoreTypes;
 
 public class Main {
     
@@ -107,7 +109,10 @@ public class Main {
 
 */
         
-        
+        gm.assignSubLayers("geo", "lg001", new LinkedHashMap<LayerTuple, String>(){{
+            put(new LayerTuple("66006_Parchi_e_Riserve", null, new StoreTuple("postgis", StoreTypes.DATA,new WorkspaceTuple( "geo"))),"green");
+            put(new LayerTuple("66006_Zone_Protezione_Speciale", null, new StoreTuple("postgis", StoreTypes.DATA,new WorkspaceTuple( "geo"))),null);
+        }});
         
         for(WorkspaceTuple ws:gm.getWorkspaces()){
             System.out.println("=========================================================================");
@@ -148,6 +153,8 @@ public class Main {
             
         }
 
+        
+        
         
         System.out.println("Fine ");
     }

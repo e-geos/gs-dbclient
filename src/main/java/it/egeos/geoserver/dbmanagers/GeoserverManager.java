@@ -223,25 +223,23 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
      */  
     public void setSubLayers(String workspace,String glayer,final LinkedHashMap<LayerTuple, String> subs){
         LayerGroupInfo lg = cat.getLayerGroupByName(workspace, glayer);
-        System.out.println("Trovato "+lg);
-        
+        LayerGroupInfo detached = cat.detach(lg);
         if(lg!=null){
-            lg.getLayers().clear();
-            lg.getStyles().clear();
+            detached.getLayers().clear();
+            detached.getStyles().clear();
             for(LayerTuple s:subs.keySet()){
                 PublishedInfo l = s.isLayerGroup()?cat.getLayerGroupByName(lg.getWorkspace(),s.name):cat.getLayerByName(s.name);
-                System.out.println("L: "+s.name+" "+l);
                 String style=subs.get(s);                
-                lg.getLayers().add(l);            
-                lg.getStyles().add(style!=null?cat.getStyleByName(style):null);           
+                detached.getLayers().add(l);            
+                detached.getStyles().add(style!=null?cat.getStyleByName(style):null);           
             }
             try {
-                getBuilder().calculateLayerGroupBounds(lg);
+                getBuilder().calculateLayerGroupBounds(detached);
             }
             catch (Exception e) {
                 log.error("Can't calculateLayerGroupBounds of a layergroup in '"+lg.getWorkspace().getName()+"' with name '"+lg.getName()+"': "+e.getMessage(), e);            
-            }
-            cat.save(lg);
+            }           
+            cat.save(detached);            
         }        
     }
    
@@ -262,14 +260,25 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     @SuppressWarnings("serial")
     public LinkedHashMap<LayerTuple,StyleTuple> getSubLayers(final String workspace,final String layergroup){
         return new LinkedHashMap<LayerTuple,StyleTuple>(){{
-            LayerGroupInfo lg = cat.getLayerGroupByName(workspace, layergroup);            
+            LayerGroupInfo lg = cat.getLayerGroupByName(workspace, layergroup);
             List<PublishedInfo> lys = lg.getLayers();
             List<StyleInfo> sts = lg.getStyles();
             for(int i=0;i<lys.size();i++){
                 PublishedInfo l = lys.get(i);
                 StyleInfo si = sts.get(i);                
+                
                 LayerTuple lt = new LayerTuple(l.getName(), l.getTitle(), new StoreTuple());
-                StyleTuple st = si!=null?new StyleTuple(si.getName(), si.getFormat(), si.getFilename(), new WorkspaceTuple(si.getWorkspace().getName())):null;
+                
+                StyleTuple st =null;
+                
+                if (si!=null){
+                    WorkspaceInfo si_ws = si.getWorkspace();
+                    WorkspaceTuple wt=null;
+                    if (si_ws!=null)
+                        wt=new WorkspaceTuple(si_ws.getName());
+                    
+                    st=new StyleTuple(si.getName(), si.getFormat(), si.getFilename(), wt);
+                }
                 put(lt,st);
             }            
         }};
