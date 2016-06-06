@@ -12,24 +12,22 @@ import org.geoserver.jdbcconfig.internal.XStreamInfoSerialBinding;
 
 public class CatalogLoader  {
     public static Catalog getCatalog(String driver, String connectionUrl, String dbUser,String dbPasswd) throws IOException {
-        ConfigDatabase configDb = new ConfigDatabase(
-            new BasicDataSource(){{        
-                setDriverClassName(driver);
-                setUrl(connectionUrl);
-                setUsername(dbUser);
-                setPassword(dbPasswd);
-                setMinIdle(3);
-                setMaxActive(10);
-            }},
-            new XStreamInfoSerialBinding(
-                new XStreamPersisterFactory()
-            )
-        ){{
-            initDb(null);    
-        }};                
-
         CatalogImpl catalog = new CatalogImpl();        
-        catalog.setFacade(new JDBCCatalogFacade(configDb));
+        catalog.setFacade(new JDBCCatalogFacade(new ConfigDatabase(
+                new BasicDataSource(){{        
+                    setDriverClassName(driver);
+                    setUrl(connectionUrl);
+                    setUsername(dbUser);
+                    setPassword(dbPasswd);
+                    setMinIdle(3);
+                    setMaxActive(10);
+                }},
+                new XStreamInfoSerialBinding(
+                    new XStreamPersisterFactory()
+                )
+            ){{
+                initDb(null);    
+            }}));
         return catalog;
     }    
 }

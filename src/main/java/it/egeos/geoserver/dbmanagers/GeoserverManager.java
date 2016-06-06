@@ -66,12 +66,16 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     
     public GeoserverManager(String login, String password, String url,String driver) {
         super(login,password,url);
-        try {
+        try {           
             cat = CatalogLoader.getCatalog(driver, url, login, password);
         } 
         catch (IOException e) {
             log.error("Can't open catalog", e);
         }        
+    }
+    
+    public Catalog getCat(){
+        return cat;
     }
     
     /** WORKSPACES **/
@@ -374,6 +378,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         getBuilder().removeResource(ft,true);
     }
     
+    //TODO: da rivedere, sbaglia epsg in fase di inserimento
     public WMSLayerInfo createWmsLayer(String workspace,String store,final String layer,final String name,final String title, String srs, ProjectionPolicy policy) throws Exception{
         return newWmsLayerInfo(workspace,store,layer,name,title,srs,policy);
     }
@@ -407,6 +412,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         );
         
         cat.save(ft);
+        cat.firePostModified(ft);
         return false;
     }
     
@@ -414,12 +420,12 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     public List<StyleTuple> getLayerStyles(final String workspace,final String layer){
         return new ArrayList<StyleTuple>(){{
             FeatureTypeInfo ft = cat.getFeatureTypeByName(workspace, layer);
-            LayerInfo ly = cat.getLayerByName(ft.getQualifiedNativeName());
-            for(StyleInfo s:ly.getStyles()){
-                WorkspaceInfo ws = s.getWorkspace();
-                WorkspaceTuple wst= ws!=null?new WorkspaceTuple(ws.getName()):null;
-                add(new StyleTuple(s.getName(), s.getFormat(), s.getFilename(),wst));
-            }
+            if (ft!=null)
+                for(StyleInfo s:cat.getLayerByName(ft.getQualifiedNativeName()).getStyles()){
+                    WorkspaceInfo ws = s.getWorkspace();
+                    WorkspaceTuple wst= ws!=null?new WorkspaceTuple(ws.getName()):null;
+                    add(new StyleTuple(s.getName(), s.getFormat(), s.getFilename(),wst));
+                }           
         }};
     }
     
@@ -429,24 +435,27 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName()); 
         l.getStyles().add(cat.getStyleByName(style));
         cat.save(l);
+        cat.firePostModified(l);
         return null;
     }
 
     public String getDefaultStyle(String workspace,String layer){
-        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
-        LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName());        
-        return l.getDefaultStyle().getName();
+        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);                    
+        return ft!=null?cat.getLayerByName(ft.getQualifiedNativeName()).getDefaultStyle().getName():null;
     }
      
-    public void setDefaultStyle(String workspace,String layer,String style){        
-        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);        
-        LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName());
-        
-        StyleInfo st = cat.getStyleByName(workspace,style);
-        if (st==null)
-            st = cat.getStyleByName(style);
-        l.setDefaultStyle(st);
-        cat.save(l);        
+    public void setDefaultStyle(String workspace,String layer,String style){    
+        FeatureTypeInfo ft=cat.getFeatureTypeByName(workspace,layer);   
+        if (ft!=null){
+            LayerInfo l =  cat.getLayerByName(ft.getQualifiedNativeName());            
+            StyleInfo st = cat.getStyleByName(workspace,style);
+            if (st==null && workspace!=null) //Avoid duplicated call
+                st = cat.getStyleByName((String)null,style);       
+            if (st!=null)
+                l.setDefaultStyle(st);                    
+            cat.save(l);
+            cat.firePostModified(l);
+        }
     }
     
     public void removeStyle(String workspace, String layer,String style){
@@ -458,7 +467,8 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
             st = cat.getStyleByName(style);
         
         l.getStyles().remove(st);
-        cat.save(l);
+        cat.save(l);     
+        cat.firePostModified(l);
     }
     
     /** Styles **/
@@ -478,11 +488,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         //TODO: gestire upload file
         return newStyleInfo(cat.getWorkspaceByName(workspace),name,sld);
     }
-    
-    
-    
-
-    
+        
     /* Deprecated */ 
 
     /**
@@ -535,7 +541,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     }
     
     /**
-     * @deprecated replaced by {@link #getWmsLayersList(final String workspace)}
+     * @deprecated replaced by {@link #getCoverageLayersList(final String workspace)}
      */
     @Deprecated
     @SuppressWarnings("serial")
@@ -557,7 +563,7 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
     }
     
     /**
-     * @deprecated replaced by {@link #getCoverageLayersList(final String workspace)}
+     * @deprecated replaced by {@link #getWmsLayersList(final String workspace)}
      */
     @Deprecated
     @SuppressWarnings("serial")
@@ -746,6 +752,14 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return createStyleInfo(null,name,sld)!=null;
     }
     
+    @Deprecated 
+    @Override    
+    public String addRole(final String name){
+        //TODO: remove because unused
+        return null;
+    }
+
+    
     //TODO: unimplementd
                
     @Override    
@@ -767,11 +781,6 @@ public class GeoserverManager extends DBManager implements GeoserverManagerAPI{
         return null;
     }
     
-    @Override    
-    public String addRole(final String name){
-        //TODO
-        return null;
-    }
 
     @Override    
     public String addRole(final String name,final String parent){
